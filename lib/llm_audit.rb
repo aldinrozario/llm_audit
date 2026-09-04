@@ -4,5 +4,6 @@ require_relative "llm_audit/version"
 
 module LlmAudit
   class Error < StandardError; end
-  # Your code goes here...
 end
+
+require_relative "llm_audit/railtie" if defined?(Rails::Railtie)

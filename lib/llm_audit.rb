@@ -5,5 +5,13 @@ require_relative "llm_audit/error"
 require_relative "llm_audit/severity"
 require_relative "llm_audit/finding"
 require_relative "llm_audit/registry"
+require_relative "llm_audit/checks/base"
+require_relative "llm_audit/checks/scaffold"
+
+module LlmAudit
+  def self.registry
+    @registry ||= Registry.new.tap { |registry| registry.register(Checks::Scaffold) }
+  end
+end
 
 require_relative "llm_audit/railtie" if defined?(Rails::Railtie)

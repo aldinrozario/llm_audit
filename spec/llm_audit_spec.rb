@@ -7,6 +7,16 @@ RSpec.describe LlmAudit do
     expect(LlmAudit::VERSION).not_to be nil
   end
 
+  describe ".registry" do
+    it "memoizes one gem-wide registry" do
+      expect(LlmAudit.registry).to be(LlmAudit.registry)
+    end
+
+    it "seeds it with the scaffold check" do
+      expect(LlmAudit.registry[:scaffold]).to be(LlmAudit::Checks::Scaffold)
+    end
+  end
+
   describe "requiring the gem" do
     def ruby(script)
       stdout, stderr, status = Open3.capture3(RbConfig.ruby, "-I", File.expand_path("../lib", __dir__), "-e", script)
@@ -25,6 +35,14 @@ RSpec.describe LlmAudit do
       stdout, exitstatus, stderr = ruby(script)
 
       expect([stdout, exitstatus]).to eq(["[nil, nil]", 0]), (stderr unless stderr.empty?)
+    end
+
+    it "loads the Finding and check seam and seeds the registry with no Rails present" do
+      script = 'require "llm_audit"; print [LlmAudit::Finding, LlmAudit::Checks::Base, LlmAudit.registry.ids].inspect'
+      stdout, exitstatus, stderr = ruby(script)
+
+      seam = "[LlmAudit::Finding, LlmAudit::Checks::Base, [:scaffold]]"
+      expect([stdout, exitstatus]).to eq([seam, 0]), (stderr unless stderr.empty?)
     end
   end
 end

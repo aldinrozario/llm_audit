@@ -8,6 +8,7 @@ require_relative "llm_audit/registry"
 require_relative "llm_audit/checks/base"
 require_relative "llm_audit/checks/scaffold"
 require_relative "llm_audit/formatters/terminal"
+require_relative "llm_audit/doctor"
 
 module LlmAudit
   def self.registry

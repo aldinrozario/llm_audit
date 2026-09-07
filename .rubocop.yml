@@ -3,6 +3,13 @@ AllCops:
   NewCops: enable
   SuggestExtensions: false
 
+Metrics/BlockLength:
+  inherit_mode:
+    merge:
+      - Exclude
+  Exclude:
+    - "spec/**/*_spec.rb"
+
 Style/StringLiterals:
   EnforcedStyle: double_quotes
 

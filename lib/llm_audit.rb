@@ -4,5 +4,6 @@ require_relative "llm_audit/version"
 require_relative "llm_audit/error"
 require_relative "llm_audit/severity"
 require_relative "llm_audit/finding"
+require_relative "llm_audit/registry"
 
 require_relative "llm_audit/railtie" if defined?(Rails::Railtie)

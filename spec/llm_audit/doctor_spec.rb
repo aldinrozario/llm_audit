@@ -5,12 +5,12 @@ require "stringio"
 RSpec.describe LlmAudit::Doctor do
   def attributes(**overrides)
     {
-      check_id: :scaffold,
+      check_id: :request_timeout,
       severity: :info,
       location: LlmAudit::Finding::CONFIG_LOCATION,
       message: "the seam works end to end",
       remediation: "Nothing to fix.",
-      owasp_reference: "LLM10:2025 Unbounded Consumption"
+      owasp_reference: "LLM06:2026 Unbounded Consumption"
     }.merge(overrides)
   end
 
@@ -328,7 +328,7 @@ RSpec.describe LlmAudit::Doctor do
     it "audits the gem-wide registry" do
       findings = described_class.new(io: io).findings
 
-      expect(findings.map(&:check_id)).to include(:scaffold)
+      expect(findings.map(&:check_id)).to include(:request_timeout)
       expect(findings.map(&:message)).not_to include(a_string_including("did not finish"))
     end
 

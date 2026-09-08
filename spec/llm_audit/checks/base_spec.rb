@@ -153,6 +153,62 @@ RSpec.describe LlmAudit::Checks::Base do
     end
   end
 
+  describe "#adapters" do
+    subject(:check) { declared_check.new }
+
+    # A bare class is a faithful stand-in here: Checks::Base only ever calls .new on what it is handed, which
+    # is what lets a check be specced on a host where no client gem is installed.
+    def stub_adapter_class = Class.new
+
+    it "defaults its adapters to the gem-wide manifest" do
+      expect(check.send(:adapters).map(&:class)).to eq(LlmAudit.adapters)
+    end
+
+    # The example above cannot tell the manifest from a hardcoded [Adapters::RubyLlm], because the manifest is
+    # a one-element literal today. This one moves the manifest out from under the default, so a check that
+    # audits a list of its own rather than everything listed fails here - invariant 1.
+    it "follows the manifest rather than a list of its own" do
+      manifest = [stub_adapter_class, stub_adapter_class]
+      allow(LlmAudit).to receive(:adapters).and_return(manifest)
+
+      expect(declared_check.new.send(:adapters).map(&:class)).to eq(manifest)
+    end
+
+    it "takes an injected adapter list, which is how a check is specced without a client gem" do
+      injected = [stub_adapter_class, stub_adapter_class]
+      injected_check = declared_check.new(adapters: injected)
+
+      expect(injected_check.send(:adapters).map(&:class)).to eq(injected)
+    end
+
+    it "builds one instance per adapter and memoizes it, since an adapter memoizes the client config it read" do
+      adapter_class = stub_adapter_class
+      allow(adapter_class).to receive(:new).and_call_original
+      injected_check = declared_check.new(adapters: [adapter_class])
+
+      expect(injected_check.send(:adapters)).to be(injected_check.send(:adapters))
+      expect(adapter_class).to have_received(:new).once
+    end
+
+    it "keeps that list private, so nothing outside a check reaches an adapter through it" do
+      expect(described_class.private_instance_methods(false)).to include(:adapters)
+      expect { check.adapters }.to raise_error(NoMethodError, /private method/)
+    end
+
+    it "still builds with no arguments at all, which is how Doctor builds every check" do
+      seen = []
+      check_class = declared_check
+      check_class.define_method(:call) do
+        seen.concat(adapters.map(&:class))
+        []
+      end
+      registry = LlmAudit::Registry.new.tap { |target| target.register(check_class) }
+
+      expect(LlmAudit::Doctor.new(registry: registry).findings).to eq([])
+      expect(seen).to eq(LlmAudit.adapters)
+    end
+  end
+
   describe "#finding" do
     subject(:check) { declared_check.new }
 

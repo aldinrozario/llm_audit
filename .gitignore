@@ -9,3 +9,11 @@
 
 # rspec failure tracking
 .rspec_status
+
+# Resolved per leg and never committed. These gemfiles pull the gem in by path, so a committed lock would
+# carry a PATH section pinning llm_audit's current version - and ruby/setup-ruby switches deployment (and
+# therefore frozen) mode on whenever a lockfile exists, so every LlmAudit::VERSION bump would break every
+# gemfiles/ leg at the setup step. Lockless, setup-ruby runs `bundle lock` fresh per leg and skips deployment
+# mode entirely; the root Gemfile.lock stays committed, because that one is the reproducibility guard.
+gemfiles/*.lock
+gemfiles/.bundle/

@@ -1,0 +1,34 @@
+version: 2
+
+# The gem's one client dependency is development-only and pinned by the lockfile at 1.16.0, while the
+# Gemfile allows the whole 1.x line. Without this the COMMITTED lockfile never moves off 1.16.0, and the
+# adapter specs - which read the REAL RubyLLM::Configuration and assert its 300/3 defaults rather than
+# hardcoding them - meet a newer client only on the lockless legs, as an unexplained red on someone's
+# unrelated PR. A bump arrives as a pull request instead: the two root-gemfile legs run against the bumped
+# lock and the two lockless legs against the same version, while the client-absent leg has no client to
+# bump - so a breaking client change lands as a red PR sitting in the PR list with the diff that caused it,
+# rather than as a scheduled-run notification to whoever last edited the cron line.
+#
+# One thing such a PR cannot honour: the lockfile it rewrites is resolved inside Dependabot's own container,
+# on that image's Ruby and its own bundler, and not on the 3.2 / bundler 4.0.19 the Gemfile's header pins
+# that resolution to - nothing here or in the repo can tell it otherwise. So a breaking client change is not
+# the only red these PRs can produce: a rewrite by a bundler older than the CHECKSUMS section drops all 74
+# entries silently, exit 0, and spec/ci/declared_floors_spec.rb's checksum example is what catches it, on
+# the two root-gemfile legs of every one of them. The remedy is to re-resolve the lock locally per the
+# Gemfile's header before merging - never to drop the guard.
+updates:
+  - package-ecosystem: "bundler"
+    directory: "/"          # the only layout the bundler ecosystem supports; it cannot see gemfiles/
+    schedule:
+      interval: "weekly"
+    # Scoped to the client and nothing else. Unscoped, Dependabot would also propose widening the
+    # gemspec's `railties >= 7.1, < 9` - raising a declared floor is precisely what the CI matrix in
+    # workflows/main.yml exists to prevent, and it is not a decision a bot should make on its own.
+    allow:
+      - dependency-name: "ruby_llm"
+    open-pull-requests-limit: 1
+    commit-message:
+      # The trailing space is deliberate and must stay: Dependabot inserts a colon after a prefix that
+      # ends in a letter, number or closing bracket, and this repo's convention is `type(scope) Subject`
+      # with no colon. It is safe from a trailing-whitespace stripper because it sits inside the quotes.
+      prefix: "chore(gemspec) "

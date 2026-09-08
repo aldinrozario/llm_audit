@@ -201,6 +201,10 @@ RSpec.describe LlmAudit::Finding do
     it "returns a frozen copy" do
       expect(build.with(severity: :error)).to be_frozen
     end
+
+    it "defines #with itself, because Data#with bypasses a custom initialize below Ruby 3.3" do
+      expect(described_class.instance_method(:with).owner).to eq(described_class)
+    end
   end
 
   describe ".undetermined" do

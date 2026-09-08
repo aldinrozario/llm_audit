@@ -31,10 +31,13 @@ Gem::Specification.new do |spec|
   # Specify which files should be added to the gem when it is released.
   # The `git ls-files -z` loads the files in the RubyGem that have been added into git.
   gemspec = File.basename(__FILE__)
+
+  # `gemfiles/` is listed separately from `Gemfile`: start_with? is case-sensitive, so the capital-G entry
+  # never matches it and the CI matrix's gemfiles would otherwise ship inside the released gem.
   spec.files = IO.popen(%w[git ls-files -z], chdir: __dir__, err: IO::NULL) do |ls|
     ls.readlines("\x0", chomp: true).reject do |f|
       (f == gemspec) ||
-        f.start_with?(*%w[bin/ Gemfile .gitignore .rspec spec/ .github/ .rubocop.yml])
+        f.start_with?(*%w[bin/ Gemfile gemfiles/ .gitignore .rspec spec/ .github/ .rubocop.yml])
     end
   end
   spec.bindir = "exe"

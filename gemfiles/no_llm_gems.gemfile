@@ -1,0 +1,14 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+# The one bundle that deliberately does NOT eval ../Gemfile: eval_gemfile can only add, and this leg exists
+# to run the suite with the client genuinely uninstalled. The Gemfile's development gems are therefore
+# restated, and spec/ci/declared_floors_spec.rb fails the default build if the two lists stop agreeing
+# about everything except the client. Alphabetical because Bundler/OrderedGems lints this file too.
+gemspec path: ".."
+
+gem "irb"
+gem "rake", "~> 13.0"
+gem "rspec", "~> 3.0"
+gem "rubocop", "~> 1.21"

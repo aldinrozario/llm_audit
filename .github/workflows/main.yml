@@ -13,11 +13,55 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    name: Ruby ${{ matrix.ruby }}
+    name: ${{ matrix.name }}
     strategy:
+      # Without this, one red floor cancels the others and the run stops saying WHICH floor broke.
+      fail-fast: false
       matrix:
-        ruby:
-          - '3.4.10'
+        # include-only, with every leg spelled out. A key that appears in `include` but nowhere else in the
+        # matrix is MERGED into the existing combinations rather than adding a leg, so a base `ruby:` list
+        # plus an `include:` carrying `gemfile:` would silently re-point the 3.4 leg instead of adding one.
+        # It also keeps this at five legs rather than the twelve that three Rubies, two railties floors and
+        # two client states would produce as a full cross-product.
+        # Every ruby value is quoted: YAML reads a bare 3.10 as the float 3.1.
+        include:
+          - name: "ruby 3.4 / railties 8.1 (baseline)"
+            ruby: "3.4"
+            gemfile: Gemfile
+          # The gemspec declares required_ruby_version >= 3.2.0, and three Data#with overrides in lib/
+          # exist solely to keep 3.2 correct - Data#with routes through a custom initialize only from 3.3,
+          # so on 3.2 a missing override means validation silently not happening.
+          - name: "ruby 3.2 floor / railties 8.1"
+            ruby: "3.2"
+            gemfile: Gemfile
+          # The gemspec declares railties >= 7.1; nothing else in the matrix ever installs a 7.x. The pin
+          # in that gemfile is tied to the declared floor by spec/ci/declared_floors_spec.rb, which reddens
+          # if the gemspec lowers its floor and this leg keeps installing the old one.
+          - name: "ruby 3.3 / railties 7.1 floor"
+            ruby: "3.3"
+            gemfile: gemfiles/rails_7_1.gemfile
+          # Both declared floors at once - the exact pair the gemspec describes, and the cell most likely
+          # to break first.
+          - name: "ruby 3.2 floor / railties 7.1 floor"
+            ruby: "3.2"
+            gemfile: gemfiles/rails_7_1.gemfile
+          - name: "ruby 3.4 / client gem absent"
+            ruby: "3.4"
+            gemfile: gemfiles/no_llm_gems.gemfile
+            # The two spec files that require spec/support/ruby_llm_client.rb cannot even be LOADED with
+            # ruby_llm uninstalled, and the LoadError fires before any tag or file filter applies - so the
+            # exclusion has to be by pattern. spec/llm_audit/adapters/client_absent_spec.rb is deliberately
+            # NOT excluded: it is what makes this leg prove something. spec/ci/declared_floors_spec.rb
+            # fails the build if this pattern stops naming exactly the spec files that require a client.
+            spec_opts: "--exclude-pattern **/{llm_audit_spec,adapters/ruby_llm_spec}.rb"
+
+    # Job level, not step level: bundler roots its local config at the GEMFILE's directory, so a
+    # BUNDLE_GEMFILE visible only to the setup step would leave `bundle config path` in gemfiles/.bundle/
+    # and the later `bundle exec` would read ./.bundle/config without it. Absolute, because a relative
+    # value is expanded against the working directory and fails silently when it is wrong.
+    env:
+      BUNDLE_GEMFILE: ${{ github.workspace }}/${{ matrix.gemfile }}
+      SPEC_OPTS: ${{ matrix.spec_opts }}
 
     steps:
       - uses: actions/checkout@v6
@@ -26,7 +70,13 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
+          # A newest-first prefix match: "3.2" takes the latest 3.2.x.
           ruby-version: ${{ matrix.ruby }}
+          # Installs from a lockfile when one exists, which also switches deployment (frozen) mode on.
+          # The root Gemfile.lock is therefore resolved on Ruby 3.2, the declared floor: a lock resolved on
+          # 3.4 can name gems that require >= 3.3, and the floor legs then exit 5 here, before a single
+          # spec runs. spec/ci/declared_floors_spec.rb catches that locally. The gemfiles/ legs ship no
+          # lock on purpose and are resolved fresh, per leg, on the Ruby that leg runs.
           bundler-cache: true
       - name: Run the default task
         run: bundle exec rake

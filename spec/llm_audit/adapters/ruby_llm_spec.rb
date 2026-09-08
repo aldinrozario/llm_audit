@@ -39,6 +39,10 @@ RSpec.describe LlmAudit::Adapters::RubyLlm do
     end
   end
 
+  # #detected? is where the client-absent path forks, and the readings that path produces are specced in
+  # spec/llm_audit/adapters/client_absent_spec.rb rather than here: that file does not require the client,
+  # so the client-absent CI leg - which excludes this file - is the one place absence is not a hide_const
+  # fake. The same three examples run there against real absence and, on every other leg, against this one.
   describe "#detected?" do
     it "is true when the host process has loaded the client" do
       expect(adapter).to be_detected
@@ -172,24 +176,6 @@ RSpec.describe LlmAudit::Adapters::RubyLlm do
       RubyLLM.configure { |config| config.request_timeout = RubyLLM::Configuration.new.request_timeout }
 
       expect(adapter.reading(:request_timeout)).to have_attributes(state: :defaulted, value: nil)
-    end
-  end
-
-  describe "when the client gem is not loaded" do
-    before { hide_const("RubyLLM") }
-
-    it "reports every canonical setting as absent, carrying neither a value nor a default" do
-      described = adapter.readings.values.map { |r| [r.setting, r.state, r.value, r.default] }
-
-      expect(described).to eq([[:request_timeout, :absent, nil, nil], [:max_retries, :absent, nil, nil]])
-    end
-
-    it "reports them as undetermined, so an unloaded client never reads as a confident OK" do
-      expect(adapter.readings.values).to all(be_undetermined)
-    end
-
-    it "does not raise while doing it, so one missing client cannot abort the audit" do
-      expect { adapter.readings }.not_to raise_error
     end
   end
 

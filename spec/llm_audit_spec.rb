@@ -106,26 +106,17 @@ RSpec.describe LlmAudit do
       expect([stdout, exitstatus]).to eq([seam, 0]), (stderr unless stderr.empty?)
     end
 
-    # A pair, and both halves are needed: hide_const cannot clear $LOADED_FEATURES, so only a process that
-    # never loaded the client can prove the negative - and only the first example proves that a process which
-    # does load it would have shown the constant, which is what stops the second from passing vacuously.
-    it "can require ruby_llm from a bare process, so the next example is not vacuous" do
+    # Half of a pair whose other half is spec/llm_audit/adapters/client_absent_spec.rb - the only spec file
+    # that exercises the absent path on the client-absent CI leg, since every spec file that requires the
+    # client is excluded there. This half stays here because it can only be true where the gem is
+    # installed: it proves that a process which DOES load the client would have shown the constant, which is
+    # what stops the absent-path example over there from passing vacuously. hide_const cannot clear
+    # $LOADED_FEATURES, so neither half can be replaced by an in-process double.
+    it "can require ruby_llm from a bare process, so the client-absent example is not vacuous" do
       script = 'require "ruby_llm"; print defined?(RubyLLM)'
       stdout, exitstatus, stderr = ruby(script)
 
       expect([stdout, exitstatus]).to eq(["constant", 0]), (stderr unless stderr.empty?)
-    end
-
-    # The readings ride along with detected? deliberately: this is the only process in the suite where the
-    # client is genuinely absent, and hide_const cannot stand in for it, so the readers are shown reporting
-    # absence here or nowhere. They are reached through the public manifest, the way a check will reach them.
-    it "never loads the client gem: the adapter reports it absent in a process that has not required it" do
-      script = 'require "llm_audit"; ' \
-               "print [defined?(RubyLLM), LlmAudit::Adapters::RubyLlm.new.detected?, " \
-               "LlmAudit.adapters.flat_map { |a| a.new.readings.values.map(&:state) }].inspect"
-      stdout, exitstatus, stderr = ruby(script)
-
-      expect([stdout, exitstatus]).to eq(["[nil, false, [:absent, :absent]]", 0]), (stderr unless stderr.empty?)
     end
   end
 end

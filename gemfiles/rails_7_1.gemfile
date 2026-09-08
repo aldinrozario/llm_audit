@@ -1,0 +1,15 @@
+# frozen_string_literal: true
+
+# Everything the default bundle has, then one pin on top. `gemspec path: ".."` alone would inherit nothing:
+# the gemspec declares no development dependencies - rspec, rake, rubocop and irb live only in the Gemfile -
+# and `rake` would die at Rakefile:4 with no rspec/core/rake_task to require. eval_gemfile re-points
+# bundler's notion of the current gemfile while it runs, so the bare `gemspec` inside ../Gemfile still
+# expands to the repo root. No `source` line is needed here, for a separate reason: eval_gemfile
+# instance_evals ../Gemfile on THIS same Bundler::Dsl, so its `source` registers on the shared source list.
+eval_gemfile "../Gemfile"
+
+# The floor the gemspec declares as `railties >= 7.1`. Bundler intersects this with the gemspec's own
+# `>= 7.1, < 9` rather than colliding with it, because `gemspec` contributes railties as a dependency OF
+# the path gem and not as a second top-level one. Resolves to 7.1.6, currently the last 7.1.x release: the
+# series is past Rails' security-support window, so this is a stable floor guard rather than a moving one.
+gem "railties", "~> 7.1.0"

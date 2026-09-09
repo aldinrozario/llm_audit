@@ -13,8 +13,8 @@ RSpec.describe LlmAudit do
       expect(LlmAudit.registry).to be(LlmAudit.registry)
     end
 
-    it "seeds it with the scaffold check" do
-      expect(LlmAudit.registry[:scaffold]).to be(LlmAudit::Checks::Scaffold)
+    it "seeds it with the request timeout check" do
+      expect(LlmAudit.registry[:request_timeout]).to be(LlmAudit::Checks::RequestTimeout)
     end
   end
 
@@ -102,7 +102,7 @@ RSpec.describe LlmAudit do
       script = 'require "llm_audit"; print [LlmAudit::Finding, LlmAudit::Checks::Base, LlmAudit.registry.ids].inspect'
       stdout, exitstatus, stderr = ruby(script)
 
-      seam = "[LlmAudit::Finding, LlmAudit::Checks::Base, [:scaffold]]"
+      seam = "[LlmAudit::Finding, LlmAudit::Checks::Base, [:request_timeout]]"
       expect([stdout, exitstatus]).to eq([seam, 0]), (stderr unless stderr.empty?)
     end
 

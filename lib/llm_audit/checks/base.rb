@@ -37,6 +37,16 @@ module LlmAudit
         def owasp_reference = metadata.owasp_reference
       end
 
+      # Takes the manifest's adapter CLASSES and hands the check instances, one per adapter per check - Doctor
+      # builds a fresh check per registry entry, so the memo is not shared across checks. An adapter memoizes
+      # the client configuration it read, so a check that built a second instance would rebuild the pristine
+      # configuration it compares against, which expands paths and reads ENV. Every argument is defaulted
+      # because Doctor builds a check with none, and LlmAudit.adapters is read here rather than at load time
+      # so that requiring this file ahead of the manifest stays load-order safe.
+      def initialize(adapters: LlmAudit.adapters)
+        @adapter_classes = adapters
+      end
+
       # Returns this check's Findings, and nothing else: it never prints, and it reports a value it
       # could not read as #undetermined rather than omitting it. Doctor is the single point that
       # coerces the return value, so a check with nothing to report may return []. Nothing downstream
@@ -46,6 +56,8 @@ module LlmAudit
       end
 
       private
+
+      def adapters = @adapters ||= @adapter_classes.map(&:new)
 
       def finding(location:, message:, remediation:, severity: self.class.default_severity)
         unless Severity.declarable?(severity)

@@ -78,8 +78,10 @@ module LlmAudit
       end
 
       # A configured reading may carry nil, and that is the point: an app that set request_timeout = nil
-      # chose *no* timeout - a value it picked, not one we failed to read. Treating nil as unknown would
-      # report the single most dangerous real configuration as unreadable.
+      # chose *no* timeout - a value it picked, not one we failed to read. A nil that matched the client's
+      # own default would have read as :defaulted, since #compare answers on value == default, so a
+      # configured nil is always a choice made against a different default. What that choice costs is
+      # client-specific and the check's to grade; nothing about an HTTP stack bears on the early return here.
       def validate_value(state, value)
         return if state == CONFIGURED || value.nil?
 

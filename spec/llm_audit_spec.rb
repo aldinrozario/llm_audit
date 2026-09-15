@@ -13,8 +13,25 @@ RSpec.describe LlmAudit do
       expect(LlmAudit.registry).to be(LlmAudit.registry)
     end
 
-    it "seeds it with the request timeout check" do
+    it "seeds it with the consumption checks, in the order the report prints them" do
+      expect(LlmAudit.registry.ids).to eq(%i[request_timeout max_retries])
       expect(LlmAudit.registry[:request_timeout]).to be(LlmAudit::Checks::RequestTimeout)
+      expect(LlmAudit.registry[:max_retries]).to be(LlmAudit::Checks::MaxRetries)
+    end
+
+    # The band each check lands on against the real client is pinned here and nowhere else: every check spec
+    # fabricates its adapters so it can run on the client-absent leg, and this file is already excluded there.
+    # A ruby_llm host on its defaults reads :defaulted for the timeout and the retries - 300s is over the
+    # timeout's limit, 3 retries is at the retry limit - so one is a :warning and the other the :info a
+    # within-limit default earns. Neither is silent, and the count the doctor task pins depends on that.
+    describe "each seeded check, run against the real client" do
+      include_context "with a pristine RubyLLM configuration"
+
+      it "reports once, at the band a ruby_llm host on its defaults deserves" do
+        bands = LlmAudit.registry.to_h { |check| [check.id, check.new.call.map(&:severity)] }
+
+        expect(bands).to eq(request_timeout: [:warning], max_retries: [:info])
+      end
     end
   end
 
@@ -102,7 +119,7 @@ RSpec.describe LlmAudit do
       script = 'require "llm_audit"; print [LlmAudit::Finding, LlmAudit::Checks::Base, LlmAudit.registry.ids].inspect'
       stdout, exitstatus, stderr = ruby(script)
 
-      seam = "[LlmAudit::Finding, LlmAudit::Checks::Base, [:request_timeout]]"
+      seam = "[LlmAudit::Finding, LlmAudit::Checks::Base, [:request_timeout, :max_retries]]"
       expect([stdout, exitstatus]).to eq([seam, 0]), (stderr unless stderr.empty?)
     end
 

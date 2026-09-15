@@ -10,12 +10,16 @@ require_relative "llm_audit/adapters/base"
 require_relative "llm_audit/adapters/ruby_llm"
 require_relative "llm_audit/checks/base"
 require_relative "llm_audit/checks/request_timeout"
+require_relative "llm_audit/checks/max_retries"
 require_relative "llm_audit/formatters/terminal"
 require_relative "llm_audit/doctor"
 
 module LlmAudit
   def self.registry
-    @registry ||= Registry.new.tap { |registry| registry.register(Checks::RequestTimeout) }
+    @registry ||= Registry.new.tap do |registry|
+      registry.register(Checks::RequestTimeout)
+      registry.register(Checks::MaxRetries)
+    end
   end
 
   # A frozen manifest rather than a Registry: the only operations a consumer needs are enumerate and select, and

@@ -316,6 +316,39 @@ RSpec.describe LlmAudit::Adapters::Reading do
     end
   end
 
+  describe "#effective" do
+    it "is the configured value on a configured reading" do
+      expect(build.effective).to eq(30)
+    end
+
+    it "is the client's default on a defaulted reading, the field that state puts the number in" do
+      expect(build(state: :defaulted, value: nil).effective).to eq(300)
+    end
+
+    it "is a configured nil as itself, because both are choices and neither is the default" do
+      expect(build(value: nil).effective).to be_nil
+    end
+
+    it "is a configured false as itself, because both are choices and neither is the default" do
+      expect(build(value: false).effective).to be(false)
+    end
+
+    (LlmAudit::Adapters::Reading::STATES - LlmAudit::Adapters::Reading::DEFAULT_BEARING_STATES).each do |state|
+      it "raises on a #{state} reading rather than answering a nil that reads as unset" do
+        expect { build_valueless(state).effective }
+          .to raise_error(LlmAudit::Error, "a #{state.inspect} reading carries nothing in effect")
+      end
+    end
+
+    it "answers on exactly the default-bearing states" do
+      expect(described_class::DEFAULT_BEARING_STATES).not_to be_empty
+
+      described_class::DEFAULT_BEARING_STATES.each do |state|
+        expect { build(state: state, value: (30 if state == :configured)).effective }.not_to raise_error
+      end
+    end
+  end
+
   describe "#with" do
     it "returns a copy carrying the replacement value" do
       expect(build.with(value: 15).value).to eq(15)

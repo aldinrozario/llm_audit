@@ -100,14 +100,16 @@ module LlmAudit
       attr_reader :threshold
 
       # Dispatch is on the state and never on #determined?, which is what keeps reading a default's number a
-      # decision rather than a leak. The else is a completeness guard and not a fallback: a sixth Reading
-      # state has to be graded deliberately instead of falling into whichever branch happens to be last, and
-      # Doctor degrades the raise to one visible undetermined finding, so the cost is this check's findings
-      # and never the run.
+      # decision rather than a leak. Both graded branches read Reading#effective, the one field the state puts
+      # a number in, so the two lines differ only in provenance and a sibling copying them cannot hand the
+      # grader a nil that was never the value. The else is a completeness guard and not a fallback: a sixth
+      # Reading state has to be graded deliberately instead of falling into whichever branch happens to be
+      # last, and Doctor degrades the raise to one visible undetermined finding, so the cost is this check's
+      # findings and never the run.
       def report(adapter, reading)
         case reading.state
-        when Adapters::Reading::CONFIGURED  then graded(adapter, reading.value, :chosen)
-        when Adapters::Reading::DEFAULTED   then graded(adapter, reading.default, :inherited)
+        when Adapters::Reading::CONFIGURED  then graded(adapter, reading.effective, :chosen)
+        when Adapters::Reading::DEFAULTED   then graded(adapter, reading.effective, :inherited)
         when Adapters::Reading::UNSUPPORTED then not_applicable(adapter)
         when Adapters::Reading::ABSENT      then not_loaded(adapter)
         when Adapters::Reading::UNREADABLE  then not_read(adapter)
@@ -148,9 +150,8 @@ module LlmAudit
       def not_read(adapter) = undetermined(**rendered(adapter, nil, NOT_READ, NOT_READ_FIX))
 
       # The client is named from the adapter's own declaration and never read off a configuration object,
-      # which inspects every provider credential it holds. A value reaches the report only when it is a
-      # finite real number: anything else is described by its class, so a String an app put in the setting
-      # is never echoed into a report that gets pasted into a ticket.
+      # which inspects every provider credential it holds. What a value may do on its way into the text is
+      # Base#printable? / #measured's rule; anything that fails it is described by #observed, never printed.
       def rendered(adapter, value, message, remediation)
         text = { gem: adapter.class.gem_name, constant: adapter.class.client_constant, limit: threshold,
                  measured: (measured(value) if printable?(value)), observed: observed(value) }
@@ -158,15 +159,6 @@ module LlmAudit
         { location: Finding::CONFIG_LOCATION, message: format(message, **text),
           remediation: format(remediation, **text) }
       end
-
-      def printable?(value) = value.is_a?(Numeric) && value.real? && value.finite?
-
-      # printable? admits any finite real Numeric, and the two beyond Integer and Float print in their own
-      # notation: BigDecimal("300") is "0.3e3" and Rational(600, 1) is "600/1", which inside [600/1/30] reads
-      # as a nested fraction rather than a measurement. Both are rendered as the Integer or Float the same
-      # number would have been written as. Safe on every printable value, since to_i is what raises on the
-      # infinite and NaN this excludes.
-      def measured(value) = value.to_i == value ? value.to_i : value.to_f
 
       def observed(value)
         printable?(value) ? "#{measured(value)}s" : "a #{value.class} rather than a positive number of seconds"

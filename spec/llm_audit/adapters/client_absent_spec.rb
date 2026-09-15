@@ -2,7 +2,7 @@
 
 require "open3"
 
-# The one spec file whose subject is the absent path - the adapter's and the check's - on the client-absent
+# The one spec file whose subject is the absent path - the adapter's and the checks' - on the client-absent
 # CI leg (gemfiles/no_llm_gems.gemfile), and the reason that leg is not vacuous: every other spec file that
 # loads the client does it through spec/support/ruby_llm_client.rb and is therefore in that leg's
 # --exclude-pattern, while this one is deliberately not - so this is the only file that keeps asserting that
@@ -36,7 +36,8 @@ RSpec.describe "the client-absent path" do
     it "reports every canonical setting as absent, carrying neither a value nor a default" do
       described = adapter.readings.values.map { |r| [r.setting, r.state, r.value, r.default] }
 
-      expect(described).to eq([[:request_timeout, :absent, nil, nil], [:max_retries, :absent, nil, nil]])
+      expect(described).to eq([[:request_timeout, :absent, nil, nil], [:max_retries, :absent, nil, nil],
+                               [:max_output_tokens, :absent, nil, nil]])
     end
 
     it "reports them as undetermined, so an unloaded client never reads as a confident OK" do
@@ -48,21 +49,27 @@ RSpec.describe "the client-absent path" do
     end
   end
 
-  # The check's own absent path, and legal in this file for the same reason the adapter's is: Base#reading
-  # answers absent before it ever resolves the client constant, so the shipped check reaches this verdict
+  # The checks' own absent path, and legal in this file for the same reason the adapter's is: Base#reading
+  # answers absent before it ever resolves the client constant, so every shipped check reaches this verdict
   # without the client being installed and this file still requires none. It runs the real manifest rather
-  # than a fabricated adapter - fabricating one is request_timeout_spec.rb's job - because what is proved
-  # here is that the check a doctor run would execute reports absence instead of a passing timeout.
-  describe "the request timeout check with no client loaded" do
-    before { hide_const("RubyLLM") }
+  # than a fabricated adapter - fabricating one is each check spec's own job - because what is proved here
+  # is that every check a doctor run would execute reports absence instead of a passing value. Driven off
+  # the registry, so a check registered tomorrow is held to this without an edit here.
+  LlmAudit.registry.each do |check|
+    describe "the #{check.id} check with no client loaded" do
+      before { hide_const("RubyLLM") }
 
-    it "reports the client absent and undetermined, never a passing timeout" do
-      findings = LlmAudit::Checks::RequestTimeout.new.call
+      it "reports the client absent and undetermined, never a passing value" do
+        findings = check.new.call
 
-      expect(findings.map { |finding| [finding.check_id, finding.severity] })
-        .to eq([%i[request_timeout undetermined]])
-      expect(findings.first.message).to include("ruby_llm client is not loaded")
+        expect(findings.map { |finding| [finding.check_id, finding.severity] }).to eq([[check.id, :undetermined]])
+        expect(findings.first.message).to include("ruby_llm client is not loaded")
+      end
     end
+  end
+
+  it "iterates a populated registry, so the loop above and the derived expectation below cannot pass on nothing" do
+    expect(LlmAudit.registry.ids).not_to be_empty
   end
 
   # Half of a pair whose other half stays in spec/llm_audit_spec.rb: only a process that has loaded the
@@ -80,28 +87,31 @@ RSpec.describe "the client-absent path" do
              "LlmAudit.adapters.flat_map { |a| a.new.readings.values.map(&:state) }].inspect"
     stdout, exitstatus, stderr = ruby(script)
 
-    expect([stdout, exitstatus]).to eq(["[nil, false, [:absent, :absent]]", 0]), (stderr unless stderr.empty?)
+    expect([stdout, exitstatus]).to eq(["[nil, false, [:absent, :absent, :absent]]", 0]), (stderr unless stderr.empty?)
   end
 
-  # The check half of that pair, and the only run in the suite that reads the shipped check's own findings
-  # with a client that is not installed at all on EVERY leg. Three other in-process runs reach that same
-  # absence - the hide_const block above, request_timeout_spec.rb's manifest example, and
-  # stdout_invariant_spec.rb's per-check loop - but the last two only on the client-absent leg itself, where
-  # the gem is uninstalled for everyone, and the first through a hide_const that fakes it everywhere else.
-  # The doctor-task subprocess meets a real absence on every leg too, but reads it as a formatted line.
-  # Here there is nothing to fake on any leg, since no leg requires the client into this subprocess. The
-  # check is built the way Doctor builds one - no arguments, so the real manifest supplies the adapters - and
-  # asked for its findings directly, so what stdout carries is the verdict and nothing a formatter added.
-  # The message is asserted because the severity alone cannot tell the two undetermined branches apart: drop
-  # Base#reading's `unless detected?` guard and the NameError from resolving the constant is swallowed by
-  # #client_values' rescue, which reads as :unreadable and reports undetermined too. Only NOT_LOADED says
-  # "is not loaded"; NOT_READ says the client "is loaded but".
-  it "never loads the client gem: the check reports it undetermined in a process that has not required it" do
+  # The check half of that pair, and the only run in the suite that reads every registered check's own
+  # findings with a client that is not installed at all on EVERY leg. Three other in-process runs reach that
+  # same absence - the registry loop above, each check spec's manifest example, and stdout_invariant_spec.rb's
+  # per-check loop - but the last two only on the client-absent leg itself, where the gem is uninstalled for
+  # everyone, and the first through a hide_const that fakes it everywhere else. The doctor-task subprocess
+  # meets a real absence on every leg too, but reads it as a formatted line. Here there is nothing to fake on
+  # any leg, since no leg requires the client into this subprocess. Each check is built the way Doctor builds
+  # one - no arguments, so the real manifest supplies the adapters - and asked for its findings directly, so
+  # what stdout carries is the verdict and nothing a formatter added. The expectation is derived from the
+  # registry's ids rather than spelled out, so registering a check does not re-edit this file; how many are
+  # registered is pinned in spec/tasks/llm_audit_doctor_spec.rb. The message is asserted because the severity
+  # alone cannot tell the two undetermined branches apart: drop Base#reading's `unless detected?` guard and
+  # the NameError from resolving the constant is swallowed by #client_values' rescue, which reads as
+  # :unreadable and reports undetermined too. Only NOT_LOADED says "is not loaded"; NOT_READ says the client
+  # "is loaded but".
+  it "never loads the client gem: every check reports it undetermined in a process that has not required it" do
     script = 'require "llm_audit"; ' \
-             "print LlmAudit::Checks::RequestTimeout.new.call" \
-             '.map { |f| [f.check_id, f.severity, f.message.include?("is not loaded")] }.inspect'
+             "print LlmAudit.registry.flat_map { |c| c.new.call" \
+             '.map { |f| [f.check_id, f.severity, f.message.include?("is not loaded")] } }.inspect'
     stdout, exitstatus, stderr = ruby(script)
+    expected = LlmAudit.registry.ids.map { |id| [id, :undetermined, true] }.inspect
 
-    expect([stdout, exitstatus]).to eq(["[[:request_timeout, :undetermined, true]]", 0]), (stderr unless stderr.empty?)
+    expect([stdout, exitstatus]).to eq([expected, 0]), (stderr unless stderr.empty?)
   end
 end

@@ -19,14 +19,16 @@ RSpec.describe LlmAudit::Adapters::RubyLlm do
     it "reads back without instantiating the adapter, which is what lets an M2 cop reuse the declaration" do
       expect(described_class).not_to receive(:new)
 
-      expect(described_class.metadata.settings).to eq(request_timeout: :request_timeout, max_retries: :max_retries)
+      expect(described_class.metadata.settings)
+        .to eq(request_timeout: :request_timeout, max_retries: :max_retries, max_output_tokens: nil)
     end
 
-    it "maps both canonical settings to a real accessor, so no reading for this client is unsupported" do
+    it "maps the two settings the client ships to real accessors and declares the output-token cap unsupported, " \
+       "since ruby_llm has no global cap" do
       accessors = canonical_settings.map { |setting| described_class.accessor_for(setting) }
 
-      expect(accessors).to eq(canonical_settings)
-      expect(adapter.readings.values.map(&:state)).not_to include(:unsupported)
+      expect(accessors).to eq([:request_timeout, :max_retries, nil])
+      expect(adapter.reading(:max_output_tokens)).to have_attributes(state: :unsupported, value: nil, default: nil)
     end
 
     it "is the whole adapter: a declaration and the two readers, with nothing else added to Base's contract" do
@@ -156,7 +158,8 @@ RSpec.describe LlmAudit::Adapters::RubyLlm do
       end
 
       expect(adapter.readings.values.map { |reading| [reading.setting, reading.state, reading.value] })
-        .to eq([[:request_timeout, :configured, 45], [:max_retries, :configured, 7]])
+        .to eq([[:request_timeout, :configured, 45], [:max_retries, :configured, 7],
+                [:max_output_tokens, :unsupported, nil]])
     end
   end
 
@@ -169,7 +172,8 @@ RSpec.describe LlmAudit::Adapters::RubyLlm do
     end
 
     it "counts it as undetermined, so an unconfigured client is never reported as a confident OK" do
-      expect(adapter.readings.values).to all(be_undetermined)
+      expect(adapter.readings.values.map(&:state)).to eq(%i[defaulted defaulted unsupported])
+      expect(adapter.readings.values_at(:request_timeout, :max_retries)).to all(be_undetermined)
     end
 
     it "cannot tell a value the app re-chose from the default, which is why defaulted is undetermined" do
@@ -190,10 +194,18 @@ RSpec.describe LlmAudit::Adapters::RubyLlm do
       expect([pristine.request_timeout, pristine.max_retries]).to eq([300, 3])
     end
 
+    it "still ships no global output-token cap, so the nil declaration stays honest" do
+      pristine = RubyLLM::Configuration.new
+
+      expect(pristine).not_to respond_to(:max_tokens, :max_output_tokens)
+      expect(RubyLLM::Configuration.options).to include(:request_timeout, :max_retries)
+      expect(RubyLLM::Configuration.options.grep(/max_tokens|output_tokens/)).to be_empty
+    end
+
     # ruby_llm registers each option's default on the class that declared it (Configuration.defaults is a
     # per-class ivar), so an anonymous subclass inherits the readers but none of the defaults, and its
-    # instances answer nil for every setting left unstated. This stand-in therefore states both canonical
-    # settings rather than one: it is ruby_llm as it shipped below 1.9.0, not a config with a single method.
+    # instances answer nil for every setting left unstated. This stand-in therefore states both settings the
+    # client ships rather than one: it is ruby_llm as it shipped below 1.9.0, not a config with a single method.
     context "when the client's defaults are not the ones this version ships" do
       let(:client_at_its_pre_1_9_defaults) do
         Class.new(RubyLLM::Configuration) do
@@ -210,7 +222,7 @@ RSpec.describe LlmAudit::Adapters::RubyLlm do
           .to have_attributes(value: 300, default: 120, state: :configured)
       end
 
-      it "takes every canonical setting off that same client, so the guard is not one accessor deep" do
+      it "takes every setting the client ships off that same client, so the guard is not one accessor deep" do
         expect(adapter.reading(:max_retries)).to have_attributes(value: nil, default: 3, state: :defaulted)
       end
     end
@@ -225,7 +237,8 @@ RSpec.describe LlmAudit::Adapters::RubyLlm do
     end
 
     it "counts that as undetermined, so a renamed client API never reads as a confident OK" do
-      expect(adapter.readings.values).to all(be_undetermined)
+      expect(adapter.readings.values_at(:request_timeout, :max_retries)).to all(be_undetermined)
+      expect(adapter.reading(:max_output_tokens).state).to eq(:unsupported)
     end
   end
 
@@ -233,7 +246,7 @@ RSpec.describe LlmAudit::Adapters::RubyLlm do
     before { RubyLLM.configure { |config| config.request_timeout = 45 } }
 
     it "produces real readings, so the two silence examples below are not vacuous" do
-      expect(adapter.readings.values.map(&:state)).to eq(%i[configured defaulted])
+      expect(adapter.readings.values.map(&:state)).to eq(%i[configured defaulted unsupported])
     end
 
     it "writes nothing to stdout while reading a real client's configuration" do
@@ -256,10 +269,13 @@ RSpec.describe LlmAudit::Adapters::RubyLlm do
       ["#<data LlmAudit::Adapters::Reading client=:ruby_llm, setting=:request_timeout, " \
        "value=45, default=300, state=:configured>",
        "#<data LlmAudit::Adapters::Reading client=:ruby_llm, setting=:max_retries, " \
-       "value=nil, default=3, state=:defaulted>"]
+       "value=nil, default=3, state=:defaulted>",
+       "#<data LlmAudit::Adapters::Reading client=:ruby_llm, setting=:max_output_tokens, " \
+       "value=nil, default=nil, state=:unsupported>"]
     end
 
-    it "prints one chosen and one defaulted reading from a booted Rails host, so the command cannot rot" do
+    it "prints one chosen, one defaulted and one unsupported reading from a booted Rails host, " \
+       "so the command cannot rot" do
       stdout, stderr, status = Open3.capture3(
         RbConfig.ruby, "-I", File.expand_path("../../../lib", __dir__), "-I", File.expand_path("../..", __dir__),
         "-e", probe

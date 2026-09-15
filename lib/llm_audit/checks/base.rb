@@ -74,6 +74,16 @@ module LlmAudit
         Finding.undetermined(check_id: self.class.id, location: location, message: message,
                              remediation: remediation, owasp_reference: self.class.owasp_reference)
       end
+
+      # The family's one rule for what a value may do on its way into a report: a finite real Numeric renders
+      # as the Integer or Float it would have been written as - BigDecimal("300") is "0.3e3" and
+      # Rational(600, 1) is "600/1", which inside [600/1/30] reads as a nested fraction - and anything else is
+      # not rendered at all, so a String an app put in a setting is never echoed into a report that gets
+      # pasted into a ticket. A check decides how to DESCRIBE a value that fails this test; none may print it.
+      # measured is only ever called behind printable?, and Infinity and NaN are why: to_i raises
+      # FloatDomainError on exactly those two.
+      def printable?(value) = value.is_a?(Numeric) && value.real? && value.finite?
+      def measured(value) = value.to_i == value ? value.to_i : value.to_f
     end
   end
 end

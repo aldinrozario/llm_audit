@@ -72,7 +72,7 @@ RSpec.describe "the undetermined invariant" do
       pristine = config_class.new(request_timeout: 300, max_retries: 3)
       adapter_class = Class.new(LlmAudit::Adapters::Base) do
         declare id: :bridge_client, gem_name: "bridge-client", client_constant: "BridgeClient",
-                settings: { request_timeout: :request_timeout, max_retries: :max_retries }
+                settings: { request_timeout: :request_timeout, max_retries: :max_retries, max_output_tokens: nil }
       end
       adapter_class.define_method(:configuration) { live }
       adapter_class.define_method(:default_configuration) { pristine }
@@ -99,7 +99,7 @@ RSpec.describe "the undetermined invariant" do
     end
 
     it "hands the check a reading with a state and no severity, so the adapter grades nothing" do
-      expect(adapter.readings.values.map(&:state)).to eq(%i[defaulted configured])
+      expect(adapter.readings.values.map(&:state)).to eq(%i[defaulted configured unsupported])
       expect(LlmAudit::Adapters::Reading.members).not_to include(:severity)
     end
 
@@ -108,9 +108,8 @@ RSpec.describe "the undetermined invariant" do
       expect(findings.first.severity).to eq(LlmAudit::Severity::UNDETERMINED)
     end
 
-    it "turns a determined reading into a finding at the severity the check declared, not the adapter" do
-      expect(findings.last).not_to be_undetermined
-      expect(findings.last.severity).to eq(:warning)
+    it "turns each determined reading into a finding at the severity the check declared, not the adapter" do
+      expect(findings.map(&:severity)).to eq(%i[undetermined warning warning])
     end
 
     it "reaches :undetermined only through the builder that takes no severity argument" do

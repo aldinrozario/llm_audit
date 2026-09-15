@@ -63,6 +63,20 @@ module LlmAudit
       def determined? = DETERMINED_STATES.include?(state)
       def undetermined? = !determined?
 
+      # The one reader a check grades through, right on both provenances: value on :configured, default on
+      # :defaulted. They are two fields because .defaulted hard-sets value to nil, so a check reading .value on
+      # both would grade the client's own default as nothing at all - a fully rendered wrong verdict, not a
+      # crash. Not `value || default`: a configured nil or false is a choice made against a different default
+      # and comes back as itself. The other three states carry nothing in effect, so asking is a dispatch bug
+      # in the caller and stays loud rather than answering a nil that reads as "unset".
+      def effective
+        unless DEFAULT_BEARING_STATES.include?(state)
+          raise Error, "a #{state.inspect} reading carries nothing in effect"
+        end
+
+        state == DEFAULTED ? default : value
+      end
+
       private
 
       def validate_symbol(field, symbol)

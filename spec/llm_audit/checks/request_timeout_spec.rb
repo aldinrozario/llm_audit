@@ -9,7 +9,7 @@ RSpec.describe LlmAudit::Checks::RequestTimeout do
   # so each is named for it: `adapter` alone is left meaning an instance, the way it does in
   # spec/llm_audit/adapters/base_spec.rb, whose own fixtures return one.
   let(:config_class) { Data.define(:request_timeout, :max_retries) }
-  let(:canonical_settings) { { request_timeout: :request_timeout, max_retries: :max_retries } }
+  let(:canonical_settings) { { request_timeout: :request_timeout, max_retries: :max_retries, max_output_tokens: nil } }
   let(:client_default) { 300 }
 
   def timeout_config(timeout) = config_class.new(request_timeout: timeout, max_retries: 3)
@@ -43,7 +43,7 @@ RSpec.describe LlmAudit::Checks::RequestTimeout do
 
   def unsupported_adapter_class
     loaded(adapter_class_over(timeout_config(600), timeout_config(client_default),
-                              settings: { request_timeout: nil, max_retries: :max_retries }))
+                              settings: { request_timeout: nil, max_retries: :max_retries, max_output_tokens: nil }))
   end
 
   # A second constant, stubbed nowhere in this file, so absence survives an example that also loads a

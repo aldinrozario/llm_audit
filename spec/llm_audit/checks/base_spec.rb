@@ -309,4 +309,41 @@ RSpec.describe LlmAudit::Checks::Base do
       expect(params & %i[check_id owasp_reference]).to be_empty
     end
   end
+
+  describe "#printable?" do
+    subject(:check) { declared_check.new }
+
+    it "is private, with #measured, because the pair is a rendering rule for the family and not an API" do
+      expect(described_class.private_instance_methods(false)).to include(:printable?, :measured)
+      expect { check.printable?(30) }.to raise_error(NoMethodError, /private method/)
+      expect { check.measured(30) }.to raise_error(NoMethodError, /private method/)
+    end
+
+    it "admits only a finite real Numeric into a report" do
+      expect([30, 60.5, Rational(7, 2)].map { |value| check.send(:printable?, value) }).to all(be(true))
+    end
+
+    it "refuses everything else, so a String an app put in a setting is never echoed into a report" do
+      refused = [nil, "600", Float::INFINITY, Float::NAN, Complex(1, 1), false, Object.new]
+
+      expect(refused.map { |value| check.send(:printable?, value) }).to all(be(false))
+    end
+  end
+
+  describe "#measured" do
+    subject(:check) { declared_check.new }
+
+    it "renders a printable value as the Integer or Float it would have been written as" do
+      values = [300, 60.5, Rational(600, 1), Rational(121, 2), 3.0]
+      rendered = values.map { |value| check.send(:measured, value) }
+
+      expect(rendered).to eq([300, 60.5, 600, 60.5, 3])
+      expect(rendered.map(&:class)).to eq([Integer, Float, Integer, Float, Integer])
+    end
+
+    it "raises FloatDomainError on the infinite and NaN, which is why it is only ever called behind #printable?" do
+      expect { check.send(:measured, Float::INFINITY) }.to raise_error(FloatDomainError)
+      expect { check.send(:measured, Float::NAN) }.to raise_error(FloatDomainError)
+    end
+  end
 end

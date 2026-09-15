@@ -100,14 +100,16 @@ module LlmAudit
       attr_reader :threshold
 
       # Dispatch is on the state and never on #determined?, which is what keeps reading a default's number a
-      # decision rather than a leak. The else is a completeness guard and not a fallback: a sixth Reading
-      # state has to be graded deliberately instead of falling into whichever branch happens to be last, and
-      # Doctor degrades the raise to one visible undetermined finding, so the cost is this check's findings
-      # and never the run.
+      # decision rather than a leak. Both graded branches read Reading#effective, the one field the state puts
+      # a number in, so the two lines differ only in provenance and a sibling copying them cannot hand the
+      # grader a nil that was never the value. The else is a completeness guard and not a fallback: a sixth
+      # Reading state has to be graded deliberately instead of falling into whichever branch happens to be
+      # last, and Doctor degrades the raise to one visible undetermined finding, so the cost is this check's
+      # findings and never the run.
       def report(adapter, reading)
         case reading.state
-        when Adapters::Reading::CONFIGURED  then graded(adapter, reading.value, :chosen)
-        when Adapters::Reading::DEFAULTED   then graded(adapter, reading.default, :inherited)
+        when Adapters::Reading::CONFIGURED  then graded(adapter, reading.effective, :chosen)
+        when Adapters::Reading::DEFAULTED   then graded(adapter, reading.effective, :inherited)
         when Adapters::Reading::UNSUPPORTED then not_applicable(adapter)
         when Adapters::Reading::ABSENT      then not_loaded(adapter)
         when Adapters::Reading::UNREADABLE  then not_read(adapter)

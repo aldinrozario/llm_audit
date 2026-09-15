@@ -11,6 +11,7 @@ require_relative "llm_audit/adapters/ruby_llm"
 require_relative "llm_audit/checks/base"
 require_relative "llm_audit/checks/request_timeout"
 require_relative "llm_audit/checks/max_retries"
+require_relative "llm_audit/checks/max_output_tokens"
 require_relative "llm_audit/formatters/terminal"
 require_relative "llm_audit/doctor"
 
@@ -19,6 +20,7 @@ module LlmAudit
     @registry ||= Registry.new.tap do |registry|
       registry.register(Checks::RequestTimeout)
       registry.register(Checks::MaxRetries)
+      registry.register(Checks::MaxOutputTokens)
     end
   end
 

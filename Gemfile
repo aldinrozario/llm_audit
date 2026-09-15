@@ -22,3 +22,8 @@ gem "rubocop", "~> 1.21"
 # Dev-only, and never required automatically: the ruby_llm adapter must be specced against the real
 # RubyLLM::Configuration, but the gem-absent path is only honest in a process that has not loaded it.
 gem "ruby_llm", "~> 1.16", require: false
+
+# Same footing as ruby_llm: dev-only, never required automatically. This is the community ruby-openai gem by
+# alexrudall (required as "openai", constant OpenAI) and not the official openai SDK, which needs Ruby >= 3.3
+# and is M2's. spec/ci/declared_floors_spec.rb subtracts this line from the client-free bundle by name.
+gem "ruby-openai", "~> 8.3", require: false

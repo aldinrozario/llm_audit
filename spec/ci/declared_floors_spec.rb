@@ -151,6 +151,12 @@ RSpec.describe "the declared floors" do
     expect(requiring).to eq(client_support_files)
   end
 
+  # client_require_names walks the manifest and consults the map only for what it finds there, so an entry
+  # left behind by a delisted adapter is dead to every other example here, and green forever.
+  it "names a require only for a gem the manifest lists, since a key the manifest lacks is never consulted" do
+    expect(client_requires.keys - client_gems).to be_empty
+  end
+
   # excluded_specs deliberately forgets which leg each pattern came from, so this is what stops one being
   # pasted onto another: a baseline leg that also skipped those two files would keep every other example
   # here green while quietly running fifty fewer of them.

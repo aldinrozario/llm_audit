@@ -48,12 +48,12 @@ jobs:
           - name: "ruby 3.4 / client gem absent"
             ruby: "3.4"
             gemfile: gemfiles/no_llm_gems.gemfile
-            # The two spec files that require spec/support/ruby_llm_client.rb cannot even be LOADED with
-            # ruby_llm uninstalled, and the LoadError fires before any tag or file filter applies - so the
-            # exclusion has to be by pattern. spec/llm_audit/adapters/client_absent_spec.rb is deliberately
+            # The three spec files that require a spec/support/*_client.rb file cannot even be LOADED with
+            # the client gems uninstalled, and the LoadError fires before any tag or file filter applies - so
+            # the exclusion has to be by pattern. spec/llm_audit/adapters/client_absent_spec.rb is deliberately
             # NOT excluded: it is what makes this leg prove something. spec/ci/declared_floors_spec.rb
             # fails the build if this pattern stops naming exactly the spec files that require a client.
-            spec_opts: "--exclude-pattern **/{llm_audit_spec,adapters/ruby_llm_spec}.rb"
+            spec_opts: "--exclude-pattern **/{llm_audit_spec,adapters/ruby_llm_spec,adapters/ruby_openai_spec}.rb"
 
     # Job level, not step level: bundler roots its local config at the GEMFILE's directory, so a
     # BUNDLE_GEMFILE visible only to the setup step would leave `bundle config path` in gemfiles/.bundle/

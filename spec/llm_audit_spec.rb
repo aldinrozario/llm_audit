@@ -2,6 +2,7 @@
 
 require "open3"
 require_relative "support/ruby_llm_client"
+require_relative "support/ruby_openai_client"
 
 RSpec.describe LlmAudit do
   it "has a version number" do
@@ -20,20 +21,41 @@ RSpec.describe LlmAudit do
       expect(LlmAudit.registry[:max_output_tokens]).to be(LlmAudit::Checks::MaxOutputTokens)
     end
 
-    # The band each check lands on against the real client is pinned here and nowhere else: every check spec
+    # The band each check lands on against the real clients is pinned here and nowhere else: every check spec
     # fabricates its adapters so it can run on the client-absent leg, and this file is already excluded there.
     # A ruby_llm host on its defaults reads :defaulted for the timeout and the retries - 300s is over the
     # timeout's limit, 3 retries is at the retry limit - so one is a :warning and the other the :info a
     # within-limit default earns; and :unsupported for the output-token cap, which that check grades at its
-    # own :warning because an uncapped response is a cost and not a not-applicable. None is silent, and the
-    # count the doctor task pins depends on that. AC10: all three consumption checks report against ruby_llm.
-    describe "each seeded check, run against the real client" do
+    # own :warning because an uncapped response is a cost and not a not-applicable. A ruby-openai host on its
+    # defaults reads :defaulted 120s for the timeout, over the limit, so a :warning too; :unsupported for the
+    # retries, because a stock install carries no retry middleware and so retries nothing - the :info
+    # no-retries finding, which is where that check has teeth; and :unsupported for the cap, the same
+    # :warning. None is silent, and the count the doctor task pins depends on that. AC10: all three
+    # consumption checks report against ruby_llm; GH-6 AC7: and against ruby-openai.
+    describe "each seeded check, run against the real clients" do
       include_context "with a pristine RubyLLM configuration"
+      include_context "with a pristine OpenAI configuration"
 
-      it "reports once, at the band a ruby_llm host on its defaults deserves" do
+      it "reports once per adapter, at the band each client on its defaults deserves" do
         bands = LlmAudit.registry.to_h { |check| [check.id, check.new.call.map(&:severity)] }
 
-        expect(bands).to eq(request_timeout: [:warning], max_retries: [:info], max_output_tokens: [:warning])
+        expect(bands).to eq(request_timeout: %i[warning warning], max_retries: %i[info info],
+                            max_output_tokens: %i[warning warning])
+      end
+
+      it "gives the missing-retry check its teeth against ruby-openai on its defaults: an :info finding that " \
+         "the client never retries, never a pass" do
+        findings = LlmAudit::Checks::MaxRetries.new(adapters: [LlmAudit::Adapters::RubyOpenai]).call
+
+        expect(findings.map(&:severity)).to eq([:info])
+        expect(findings.first.message).to include("ruby-openai client ships no retry setting")
+      end
+
+      it "reports the uncapped :warning against ruby-openai, never undetermined" do
+        findings = LlmAudit::Checks::MaxOutputTokens.new(adapters: [LlmAudit::Adapters::RubyOpenai]).call
+
+        expect(findings.map(&:severity)).to eq([:warning])
+        expect(findings.first.message).to include("ships no global output-token cap")
       end
     end
   end
@@ -47,8 +69,8 @@ RSpec.describe LlmAudit do
       expect(LlmAudit.adapters).to be_frozen
     end
 
-    it "holds the ruby_llm adapter" do
-      expect(LlmAudit.adapters).to include(LlmAudit::Adapters::RubyLlm)
+    it "holds the ruby_llm and ruby-openai adapters, in the order the report lists them" do
+      expect(LlmAudit.adapters).to eq([LlmAudit::Adapters::RubyLlm, LlmAudit::Adapters::RubyOpenai])
     end
 
     it "holds only adapters, so nothing here can be mistaken for a check the Doctor would call" do
@@ -75,13 +97,15 @@ RSpec.describe LlmAudit do
 
     # AC9's runtime half, driven off the manifest rather than written once per adapter. Its static half is
     # the Ripper scan in stdout_invariant_spec, which globs all of lib/ and needs no edit for a new adapter;
-    # this loop is what makes a new adapter's silence generative too. The RubyLLM context is included because
-    # reading the one adapter listed today materialises that client's process-global config, and
-    # spec/support/ruby_llm_client.rb is the one documented way to touch it - a fresh global happens to equal
-    # a pristine one, so nothing reddens without this today, but that is a coincidence and not a contract.
+    # this loop is what makes a new adapter's silence generative too. Both client contexts are included
+    # because reading either adapter materialises that client's process-global config, and the
+    # spec/support/*_client.rb files are the one documented way to touch them - a fresh global happens to
+    # equal a pristine one, so nothing reddens without this today, but that is a coincidence and not a
+    # contract.
     LlmAudit.adapters.each do |adapter|
       describe "the #{adapter.id} adapter, run for real" do
         include_context "with a pristine RubyLLM configuration"
+        include_context "with a pristine OpenAI configuration"
 
         it "answers for every canonical setting, so the two silence examples below are not vacuous" do
           expect(adapter.new.readings.keys).to eq(LlmAudit::Adapters::Base::SETTINGS)
@@ -134,6 +158,14 @@ RSpec.describe LlmAudit do
     # $LOADED_FEATURES, so neither half can be replaced by an in-process double.
     it "can require ruby_llm from a bare process, so the client-absent example is not vacuous" do
       script = 'require "ruby_llm"; print defined?(RubyLLM)'
+      stdout, exitstatus, stderr = ruby(script)
+
+      expect([stdout, exitstatus]).to eq(["constant", 0]), (stderr unless stderr.empty?)
+    end
+
+    it "can require ruby-openai from a bare process, under its own require name, so the client-absent " \
+       "example is not vacuous for it either" do
+      script = 'require "openai"; print defined?(OpenAI::Configuration)'
       stdout, exitstatus, stderr = ruby(script)
 
       expect([stdout, exitstatus]).to eq(["constant", 0]), (stderr unless stderr.empty?)

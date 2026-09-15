@@ -27,24 +27,26 @@ RSpec.describe "rake llm_audit:doctor" do
   end
 
   # The severity band is deliberately not asserted here: this file runs in three worlds that observe three
-  # different reading states. In process the client is loaded, because another spec file requires it at
+  # different reading states. In process the clients are loaded, because other spec files require them at
   # load time, so the reading is :defaulted - or :unsupported, for a setting the client ships no accessor
-  # for; the subprocess below may not require a client at all, so the reading is :absent; and on the
-  # client-absent CI leg the whole file sees what that subprocess sees.
-  # What holds in all three is that one finding per registered check is printed, attributed to that check,
-  # against the symbolic config location and carrying the check's reference. Which band is the check spec's
-  # to pin, per state; what this file still pins is that a band was rendered at all, in the formatter's
-  # `[BAND] id:` shape - matching the id alone would pass on a formatter that had stopped emitting the line.
+  # for, or that this host wired no retry middleware for; the subprocess below may not require a client at
+  # all, so the reading is :absent; and on the client-absent CI leg the whole file sees what that subprocess
+  # sees.
+  # What holds in all three is that one finding per registered check per listed adapter is printed,
+  # attributed to that check, against the symbolic config location and carrying the check's reference. Which
+  # band is the check spec's to pin, per state; what this file still pins is that a band was rendered at all,
+  # in the formatter's `[BAND] id:` shape - matching the id alone would pass on a formatter that had stopped
+  # emitting the line.
   # The count holds in all three worlds only because no registered check falls silent on a client's own
   # default: a within-limit default is :info, never nothing. The absence is the other half: Doctor degrades
   # a raising check to an undetermined finding under that check's own id, at the same config location,
   # carrying the same reference, so every positive assertion here is also satisfied by a check that raised
   # before it read anything. "did not finish" is the one word that tells the two apart - the marker
   # spec/llm_audit/doctor_spec.rb guards its own default run with.
-  it "prints one finding per registered check through the terminal formatter" do
+  it "prints one finding per registered check per listed adapter through the terminal formatter" do
     printed = capture_stdout { task.invoke }
 
-    expect(printed).to include("llm_audit: 3 findings", "(config)", "owasp:", "LLM06:2026 Unbounded Consumption")
+    expect(printed).to include("llm_audit: 6 findings", "(config)", "owasp:", "LLM06:2026 Unbounded Consumption")
     expect(printed).to match(/\[[A-Z]+\] request_timeout: /)
     expect(printed).to match(/\[[A-Z]+\] max_retries: /)
     expect(printed).to match(/\[[A-Z]+\] max_output_tokens: /)
@@ -65,7 +67,7 @@ RSpec.describe "rake llm_audit:doctor" do
       )
 
       expect([stdout, status.exitstatus]).to match(
-        [a_string_including("llm_audit: 3 findings")
+        [a_string_including("llm_audit: 6 findings")
           .and(a_string_including("[UNDETERMINED] request_timeout"))
           .and(a_string_including("[UNDETERMINED] max_retries"))
           .and(a_string_including("[UNDETERMINED] max_output_tokens"))

@@ -271,11 +271,17 @@ RSpec.describe LlmAudit::Adapters::RubyLlm do
        "#<data LlmAudit::Adapters::Reading client=:ruby_llm, setting=:max_retries, " \
        "value=nil, default=3, state=:defaulted>",
        "#<data LlmAudit::Adapters::Reading client=:ruby_llm, setting=:max_output_tokens, " \
-       "value=nil, default=nil, state=:unsupported>"]
+       "value=nil, default=nil, state=:unsupported>",
+       "#<data LlmAudit::Adapters::Reading client=:ruby_openai, setting=:request_timeout, " \
+       "value=nil, default=nil, state=:absent>",
+       "#<data LlmAudit::Adapters::Reading client=:ruby_openai, setting=:max_retries, " \
+       "value=nil, default=nil, state=:absent>",
+       "#<data LlmAudit::Adapters::Reading client=:ruby_openai, setting=:max_output_tokens, " \
+       "value=nil, default=nil, state=:absent>"]
     end
 
-    it "prints one chosen, one defaulted and one unsupported reading from a booted Rails host, " \
-       "so the command cannot rot" do
+    it "prints one chosen, one defaulted and one unsupported reading from a booted Rails host, and absent " \
+       "for the client it did not load, so the command cannot rot" do
       stdout, stderr, status = Open3.capture3(
         RbConfig.ruby, "-I", File.expand_path("../../../lib", __dir__), "-I", File.expand_path("../..", __dir__),
         "-e", probe

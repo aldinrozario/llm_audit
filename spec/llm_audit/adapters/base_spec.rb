@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
 RSpec.describe LlmAudit::Adapters::Base do
-  let(:config_class) { Data.define(:request_timeout, :max_retries) }
-  let(:canonical_settings) { { request_timeout: :request_timeout, max_retries: :max_retries } }
+  let(:config_class) { Data.define(:request_timeout, :max_retries, :max_output_tokens) }
+  let(:canonical_settings) do
+    { request_timeout: :request_timeout, max_retries: :max_retries, max_output_tokens: :max_output_tokens }
+  end
 
   def declared_adapter(id: :fixture_client, gem_name: "fictional-client",
                        client_constant: "FictionalClient", settings: canonical_settings)
@@ -30,8 +32,9 @@ RSpec.describe LlmAudit::Adapters::Base do
                                  settings: canonical_settings)
   end
 
-  def config(request_timeout: 300, max_retries: 3)
-    config_class.new(request_timeout: request_timeout, max_retries: max_retries)
+  def config(request_timeout: 300, max_retries: 3, max_output_tokens: 4096)
+    config_class.new(request_timeout: request_timeout, max_retries: max_retries,
+                     max_output_tokens: max_output_tokens)
   end
 
   def metadata_attributes(**overrides)
@@ -45,7 +48,7 @@ RSpec.describe LlmAudit::Adapters::Base do
 
   describe "SETTINGS" do
     it "is the one vocabulary every adapter answers, so a check asks each client the same question" do
-      expect(described_class::SETTINGS).to eq(%i[request_timeout max_retries])
+      expect(described_class::SETTINGS).to eq(%i[request_timeout max_retries max_output_tokens])
     end
 
     it "is frozen, so no adapter can widen the vocabulary for the others" do
@@ -69,7 +72,7 @@ RSpec.describe LlmAudit::Adapters::Base do
     end
 
     it "freezes the settings map, so two adapters cannot share a mutable mapping" do
-      mapping = { request_timeout: :request_timeout, max_retries: :max_retries }
+      mapping = { request_timeout: :request_timeout, max_retries: :max_retries, max_output_tokens: :max_output_tokens }
       declared = build_metadata(settings: mapping)
       mapping[:request_timeout] = :hijacked
 
@@ -85,7 +88,8 @@ RSpec.describe LlmAudit::Adapters::Base do
     it "checks its symbols with Reading.valid_symbol?, so the layer holds one copy of the rule and not two" do
       allow(LlmAudit::Adapters::Reading).to receive(:valid_symbol?).and_call_original
 
-      build_metadata(id: :fixture, settings: { request_timeout: :request_timeout, max_retries: nil })
+      build_metadata(id: :fixture, settings: { request_timeout: :request_timeout, max_retries: nil,
+                                               max_output_tokens: :max_output_tokens })
 
       expect(LlmAudit::Adapters::Reading).to have_received(:valid_symbol?).with(:fixture)
       expect(LlmAudit::Adapters::Reading).to have_received(:valid_symbol?).with(:request_timeout)
@@ -126,17 +130,19 @@ RSpec.describe LlmAudit::Adapters::Base do
 
     it "rejects a map that omits a canonical setting, because an omission is an oversight and a nil is a decision" do
       expect { build_metadata(settings: { request_timeout: :request_timeout }) }
-        .to raise_error(ArgumentError, "settings must map exactly [:request_timeout, :max_retries], " \
-                                       "got [:request_timeout]")
+        .to raise_error(ArgumentError, "settings must map exactly [:request_timeout, :max_retries, " \
+                                       ":max_output_tokens], got [:request_timeout]")
     end
 
     it "rejects a setting outside the canonical vocabulary, so an adapter cannot answer a question no check asks" do
       expect { build_metadata(settings: canonical_settings.merge(temperature: :temperature)) }
-        .to raise_error(ArgumentError, /settings must map exactly \[:request_timeout, :max_retries\]/)
+        .to raise_error(ArgumentError,
+                        /settings must map exactly \[:request_timeout, :max_retries, :max_output_tokens\]/)
     end
 
     it "accepts the map in any order, since a declaration is a mapping and not a sequence" do
-      expect(build_metadata(settings: { max_retries: :max_retries, request_timeout: :request_timeout }))
+      expect(build_metadata(settings: { max_output_tokens: :max_output_tokens, max_retries: :max_retries,
+                                        request_timeout: :request_timeout }))
         .to eq(build_metadata)
     end
 
@@ -189,7 +195,7 @@ RSpec.describe LlmAudit::Adapters::Base do
       adapter_class = declared_adapter
 
       expect(described_class::SETTINGS.map { |setting| adapter_class.accessor_for(setting) })
-        .to eq(%i[request_timeout max_retries])
+        .to eq(%i[request_timeout max_retries max_output_tokens])
     end
 
     it "answers nil for a setting outside the canonical vocabulary rather than raising" do
@@ -363,7 +369,8 @@ RSpec.describe LlmAudit::Adapters::Base do
 
     it "reports a setting mapped to nil as unsupported: the ruby-openai case, a client with no retry setting" do
       adapter = reading_adapter(live: config, pristine: config,
-                                settings: { request_timeout: :request_timeout, max_retries: nil })
+                                settings: { request_timeout: :request_timeout, max_retries: nil,
+                                            max_output_tokens: :max_output_tokens })
 
       expect(adapter.reading(:max_retries))
         .to have_attributes(setting: :max_retries, value: nil, default: nil, state: :unsupported)
@@ -371,7 +378,8 @@ RSpec.describe LlmAudit::Adapters::Base do
 
     it "counts that unsupported reading as determined, because a client that ships no such setting is a fact" do
       adapter = reading_adapter(live: config, pristine: config,
-                                settings: { request_timeout: :request_timeout, max_retries: nil })
+                                settings: { request_timeout: :request_timeout, max_retries: nil,
+                                            max_output_tokens: :max_output_tokens })
 
       expect(adapter.reading(:max_retries)).to be_determined
     end
@@ -379,7 +387,8 @@ RSpec.describe LlmAudit::Adapters::Base do
     it "refuses a setting outside the vocabulary, which only our own caller could ask for, rather than " \
        "answering the confident unsupported it has no evidence for" do
       expect { reading_adapter(live: config, pristine: config).reading(:temperature) }
-        .to raise_error(ArgumentError, "setting must be one of [:request_timeout, :max_retries], got :temperature")
+        .to raise_error(ArgumentError, "setting must be one of [:request_timeout, :max_retries, :max_output_tokens], " \
+                                       "got :temperature")
     end
 
     it "refuses it before asking the host whether the client is even loaded, so a typo reads the same either way" do
@@ -391,7 +400,8 @@ RSpec.describe LlmAudit::Adapters::Base do
 
     it "keeps the leniency that has a subject: a declared nil is still unsupported and never raises" do
       adapter = reading_adapter(live: config, pristine: config,
-                                settings: { request_timeout: :request_timeout, max_retries: nil })
+                                settings: { request_timeout: :request_timeout, max_retries: nil,
+                                            max_output_tokens: :max_output_tokens })
 
       expect { adapter.reading(:max_retries) }.not_to raise_error
       expect(adapter.reading(:max_retries)).to have_attributes(state: :unsupported)
@@ -402,7 +412,7 @@ RSpec.describe LlmAudit::Adapters::Base do
       adapter = reading_adapter(live: config, pristine: config)
 
       expect(described_class::SETTINGS.map { |setting| adapter.reading(setting).state })
-        .to eq(%i[absent absent])
+        .to eq(%i[absent absent absent])
     end
 
     it "reports an absent reading as undetermined, so an unloaded gem never reads as a confident OK" do
@@ -422,7 +432,8 @@ RSpec.describe LlmAudit::Adapters::Base do
     it "asks detection before support, so an adapter for an absent gem makes no confident claim about it" do
       hide_const("FictionalClient")
       adapter = reading_adapter(live: config, pristine: config,
-                                settings: { request_timeout: :request_timeout, max_retries: nil })
+                                settings: { request_timeout: :request_timeout, max_retries: nil,
+                                            max_output_tokens: :max_output_tokens })
 
       expect(adapter.reading(:max_retries)).to have_attributes(state: :absent)
       expect(adapter.reading(:max_retries)).to be_undetermined
@@ -433,7 +444,7 @@ RSpec.describe LlmAudit::Adapters::Base do
       stub_const("Brand", "acme")
       adapter = reading_adapter(live: config, pristine: config, client_constant: "Brand::Client")
 
-      expect(adapter.readings.values.map(&:state)).to eq(%i[absent absent])
+      expect(adapter.readings.values.map(&:state)).to eq(%i[absent absent absent])
       expect(adapter.readings.values).to all(be_undetermined)
     end
 
@@ -493,7 +504,7 @@ RSpec.describe LlmAudit::Adapters::Base do
 
       it "still answers for every canonical setting, which is what a whole-manifest sweep depends on" do
         expect { adapter.readings }.not_to raise_error
-        expect(adapter.readings.values.map(&:state)).to eq(%i[unreadable unreadable])
+        expect(adapter.readings.values.map(&:state)).to eq(%i[unreadable unreadable unreadable])
       end
 
       it "is not a vacuous witness: that LoadError really is outside the StandardError the rescue names" do
@@ -518,7 +529,7 @@ RSpec.describe LlmAudit::Adapters::Base do
     it "stamps the adapter's own id on every reading, so a reading is attributable to one client" do
       adapter = reading_adapter(live: config(request_timeout: 45), pristine: config, id: :other_client)
 
-      expect(adapter.readings.values.map(&:client)).to eq(%i[other_client other_client])
+      expect(adapter.readings.values.map(&:client)).to eq(%i[other_client other_client other_client])
     end
 
     it "has no parameter through which an adapter could attribute a reading to another client" do
@@ -537,17 +548,18 @@ RSpec.describe LlmAudit::Adapters::Base do
     end
 
     it "asks every setting the same question, so a client's second setting is never silently skipped" do
-      adapter = reading_adapter(live: config(request_timeout: 45, max_retries: 5), pristine: config)
+      adapter = reading_adapter(live: config(request_timeout: 45, max_retries: 5, max_output_tokens: 8192),
+                                pristine: config)
 
-      expect(adapter.readings.values.map(&:state)).to eq(%i[configured configured])
-      expect(adapter.readings.values.map(&:value)).to eq([45, 5])
+      expect(adapter.readings.values.map(&:state)).to eq(%i[configured configured configured])
+      expect(adapter.readings.values.map(&:value)).to eq([45, 5, 8192])
     end
 
     it "still answers for every setting when the client is not loaded" do
       hide_const("FictionalClient")
       adapter = reading_adapter(live: config, pristine: config)
 
-      expect(adapter.readings.values.map(&:state)).to eq(%i[absent absent])
+      expect(adapter.readings.values.map(&:state)).to eq(%i[absent absent absent])
       expect(adapter.readings.values).to all(be_undetermined)
     end
   end
@@ -556,19 +568,23 @@ RSpec.describe LlmAudit::Adapters::Base do
     it "adds a client in one subclass - a declaration and two readers - without touching Base" do
       stub_const("Fictional", Module.new)
       stub_const("Fictional::Configuration", config_class)
-      stub_const("Fictional::CONFIG", config_class.new(request_timeout: 45, max_retries: 3))
+      stub_const("Fictional::CONFIG", config_class.new(request_timeout: 45, max_retries: 3, max_output_tokens: nil))
 
       adapter_class = Class.new(described_class) do
         declare id: :fictional, gem_name: "fictional-ai", client_constant: "Fictional",
-                settings: { request_timeout: :request_timeout, max_retries: nil }
+                settings: { request_timeout: :request_timeout, max_retries: nil, max_output_tokens: nil }
 
         def configuration = client_module::CONFIG
-        def default_configuration = client_module::Configuration.new(request_timeout: 300, max_retries: 3)
+
+        def default_configuration
+          client_module::Configuration.new(request_timeout: 300, max_retries: 3, max_output_tokens: nil)
+        end
       end
 
       expect(adapter_class.instance_methods(false)).to contain_exactly(:configuration, :default_configuration)
       expect(adapter_class.new.readings.values.map { |reading| [reading.setting, reading.state, reading.value] })
-        .to eq([[:request_timeout, :configured, 45], [:max_retries, :unsupported, nil]])
+        .to eq([[:request_timeout, :configured, 45], [:max_retries, :unsupported, nil],
+                [:max_output_tokens, :unsupported, nil]])
     end
 
     it "reaches its client through #client_module, so an adapter never has to name a constant twice" do

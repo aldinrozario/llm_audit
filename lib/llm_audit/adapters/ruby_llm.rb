@@ -5,10 +5,13 @@ module LlmAudit
     # Named RubyLlm and not RubyLLM on purpose: inside a class named after the client, a bare RubyLLM.config
     # would resolve to this adapter instead of the gem. The client is reached only through #client_module.
     class RubyLlm < Base
+      # max_output_tokens is nil because ruby_llm has no client-wide output cap to read: a cap is per request
+      # (`with_params(max_tokens:)`), or one the Anthropic provider fills from the model registry when a request
+      # sends none. An explicit nil is the declaration that this client ships no such setting.
       declare id: :ruby_llm,
               gem_name: "ruby_llm",
               client_constant: "RubyLLM",
-              settings: { request_timeout: :request_timeout, max_retries: :max_retries }
+              settings: { request_timeout: :request_timeout, max_retries: :max_retries, max_output_tokens: nil }
 
       # Reading RubyLLM.config materialises the client's global config (@config ||= Configuration.new), and in
       # a Rails app the client's own Railtie has already done so during boot - which is why "did this app ever

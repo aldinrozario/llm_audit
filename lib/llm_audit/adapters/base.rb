@@ -3,7 +3,7 @@
 module LlmAudit
   module Adapters
     class Base
-      SETTINGS = %i[request_timeout max_retries].freeze
+      SETTINGS = %i[request_timeout max_retries max_output_tokens].freeze
 
       Metadata = Data.define(:id, :gem_name, :client_constant, :settings)
 

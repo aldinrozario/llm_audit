@@ -150,9 +150,8 @@ module LlmAudit
       def not_read(adapter) = undetermined(**rendered(adapter, nil, NOT_READ, NOT_READ_FIX))
 
       # The client is named from the adapter's own declaration and never read off a configuration object,
-      # which inspects every provider credential it holds. A value reaches the report only when it is a
-      # finite real number: anything else is described by its class, so a String an app put in the setting
-      # is never echoed into a report that gets pasted into a ticket.
+      # which inspects every provider credential it holds. What a value may do on its way into the text is
+      # Base#printable? / #measured's rule; anything that fails it is described by #observed, never printed.
       def rendered(adapter, value, message, remediation)
         text = { gem: adapter.class.gem_name, constant: adapter.class.client_constant, limit: threshold,
                  measured: (measured(value) if printable?(value)), observed: observed(value) }
@@ -160,15 +159,6 @@ module LlmAudit
         { location: Finding::CONFIG_LOCATION, message: format(message, **text),
           remediation: format(remediation, **text) }
       end
-
-      def printable?(value) = value.is_a?(Numeric) && value.real? && value.finite?
-
-      # printable? admits any finite real Numeric, and the two beyond Integer and Float print in their own
-      # notation: BigDecimal("300") is "0.3e3" and Rational(600, 1) is "600/1", which inside [600/1/30] reads
-      # as a nested fraction rather than a measurement. Both are rendered as the Integer or Float the same
-      # number would have been written as. Safe on every printable value, since to_i is what raises on the
-      # infinite and NaN this excludes.
-      def measured(value) = value.to_i == value ? value.to_i : value.to_f
 
       def observed(value)
         printable?(value) ? "#{measured(value)}s" : "a #{value.class} rather than a positive number of seconds"

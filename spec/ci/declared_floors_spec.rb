@@ -30,11 +30,18 @@ RSpec.describe "the declared floors" do
   # adapter has to be subtracted from the client-free bundle, and has to load its client through its own
   # support file, on the day it is declared rather than the day someone remembers these two examples. The
   # quotes are part of the pattern, so a gem merely PREFIXED with a client's name - ruby_llm_extras - is
-  # never mistaken for the client itself.
+  # never mistaken for the client itself. The one fact the manifest does not carry is a client's require
+  # name, because nothing in lib/ ever requires one: ruby-openai is `require "openai"` (`require "ruby-openai"`
+  # is a LoadError on every version). A gem absent from that map is required under its own name, so a third
+  # client whose two names differ goes red below on the day it is declared, never silent. Support files are
+  # named from the adapter's id - a Symbol, and snake_case by convention where a gem name is free to carry a
+  # hyphen - which is what keeps a hyphenated gem name out of a file name.
   let(:client_gems) { LlmAudit.adapters.map(&:gem_name) }
+  let(:client_requires) { { "ruby-openai" => "openai" } }
+  let(:client_require_names) { client_gems.map { |gem_name| client_requires.fetch(gem_name, gem_name) } }
   let(:quoted_client_gem) { /["']#{Regexp.union(client_gems)}["']/ }
-  let(:client_gem_require) { /^require\s+#{quoted_client_gem}/ }
-  let(:client_support_files) { client_gems.map { |gem_name| "support/#{gem_name}_client.rb" }.sort }
+  let(:client_gem_require) { /^require\s+["']#{Regexp.union(client_require_names)}["']/ }
+  let(:client_support_files) { LlmAudit.adapters.map { |adapter| "support/#{adapter.id}_client.rb" }.sort }
 
   # spec/support/<client>_client.rb is where a client gem gets required at file-load time, and a spec file
   # reaches it with a top-level require_relative. The `_client` suffix is the discriminator: a bare
@@ -142,6 +149,12 @@ RSpec.describe "the declared floors" do
     end
 
     expect(requiring).to eq(client_support_files)
+  end
+
+  # client_require_names walks the manifest and consults the map only for what it finds there, so an entry
+  # left behind by a delisted adapter is dead to every other example here, and green forever.
+  it "names a require only for a gem the manifest lists, since a key the manifest lacks is never consulted" do
+    expect(client_requires.keys - client_gems).to be_empty
   end
 
   # excluded_specs deliberately forgets which leg each pattern came from, so this is what stops one being

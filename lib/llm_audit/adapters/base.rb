@@ -124,14 +124,15 @@ module LlmAudit
 
       # The extension point. Adding a client gem is one new file - a subclass that declares its id, gem name,
       # client constant and the accessor each canonical setting maps to, then implements these two readers -
-      # and Base is never reopened for it. Reach the client itself through the private #client_module and
-      # never by naming its constant a second time: client_constant stays the one place the client's identity
-      # is written down, which is what lets the subclass be called RubyLlm without shadowing the RubyLLM it
-      # reads. An adapter knows clients, not severities: it returns Readings and never Findings, and it never
-      # prints. Nothing the client does, and nothing the host has done to the constant that names it, makes
-      # #detected? or #reading raise - a client that cannot be resolved at all is one more value the adapter
-      # cannot obtain, and comes back as an undetermined Reading instead of aborting the audit - while a
-      # construction bug of our own still does: an adapter that never declared its metadata, never
+      # and, when a declared setting is shipped by the host rather than the client, overrides the private
+      # #ships? below - and Base is never reopened for it. Reach the client itself through the private
+      # #client_module and never by naming its constant a second time: client_constant stays the one place the
+      # client's identity is written down, which is what lets the subclass be called RubyLlm without shadowing
+      # the RubyLLM it reads. An adapter knows clients, not severities: it returns Readings and never Findings,
+      # and it never prints. Nothing the client does, and nothing the host has done to the constant that names
+      # it, makes #detected? or #reading raise - a client that cannot be resolved at all is one more value the
+      # adapter cannot obtain, and comes back as an undetermined Reading instead of aborting the audit - while
+      # a construction bug of our own still does: an adapter that never declared its metadata, never
       # implemented a reader, or a caller that asked for a setting outside SETTINGS.
       # #configuration returns the live object the app runs on; #default_configuration returns a pristine one,
       # which is what makes provenance observable without any adapter hardcoding a default that upstream is
@@ -171,8 +172,9 @@ module LlmAudit
       end
 
       def compare(setting, accessor)
-        pair = client_values(accessor)
+        pair = client_values(setting, accessor)
         return Reading.unreadable(client: self.class.id, setting: setting) if pair.nil?
+        return Reading.unsupported(client: self.class.id, setting: setting) if pair.empty?
 
         value, default = pair
         return Reading.defaulted(client: self.class.id, setting: setting, default: default) if value == default
@@ -180,18 +182,31 @@ module LlmAudit
         Reading.configured(client: self.class.id, setting: setting, value: value, default: default)
       end
 
-      # Tight on purpose: the rescue wraps the two client readers and nothing else. Drift in a client we do
-      # not own comes back as an unreadable reading, while a construction bug of ours - an adapter that never
-      # declared its metadata, a Reading built wrong - stays loud instead of arriving dressed as drift.
-      def client_values(accessor)
+      # Tight on purpose: the rescue wraps the two client readers and the support hook, and nothing else. Drift
+      # in a client we do not own comes back as an unreadable reading, while a construction bug of ours - an
+      # adapter that never declared its metadata, a Reading built wrong - stays loud instead of arriving
+      # dressed as drift. An empty pair is the hook's answer and never a value: the accessor is there to
+      # read, and this host ships nothing behind it.
+      def client_values(setting, accessor)
         live = configuration
         pristine = default_configuration
         return unless live.respond_to?(accessor) && pristine.respond_to?(accessor)
+        return [] unless ships?(setting)
 
         [live.public_send(accessor), pristine.public_send(accessor)]
       rescue StandardError
         nil
       end
+
+      # The runtime half of a declared nil. A declared accessor says the client ships the setting; this says
+      # whether THIS host does, for a client where that is a fact about the process rather than the gem:
+      # ruby-openai retries only through middleware the host adds to its connection, so a stock install has no
+      # count to read and nothing that retries - a fact about this host, and never a default. Asked inside the
+      # same rescue as the readers, because answering can mean building a client, and after the accessor
+      # check, because an accessor that is not there is drift before it is anything else - a confident "not
+      # shipped" must never paper over a client whose API moved. True unless an adapter overrides it,
+      # privately: the public contract stays the two readers.
+      def ships?(_setting) = true
     end
   end
 end

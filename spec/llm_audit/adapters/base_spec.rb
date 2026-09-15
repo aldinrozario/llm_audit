@@ -27,6 +27,15 @@ RSpec.describe LlmAudit::Adapters::Base do
     adapter_class.new
   end
 
+  def unshipping_adapter(live:, pristine:, unshipped:, **overrides)
+    adapter_class = declared_adapter(**overrides)
+    adapter_class.define_method(:configuration) { live }
+    adapter_class.define_method(:default_configuration) { pristine }
+    adapter_class.define_method(:ships?) { |setting| !unshipped.include?(setting) }
+    adapter_class.send(:private, :ships?)
+    adapter_class.new
+  end
+
   def redeclare(adapter_class)
     adapter_class.send(:declare, id: :hijacked, gem_name: "hijacked", client_constant: "Hijacked",
                                  settings: canonical_settings)
@@ -535,6 +544,106 @@ RSpec.describe LlmAudit::Adapters::Base do
     it "has no parameter through which an adapter could attribute a reading to another client" do
       expect(described_class.instance_method(:reading).parameters.map(&:last)).to eq([:setting])
     end
+
+    describe "the support hook" do
+      it "is private and answers true by default, so a declared accessor is read as declared" do
+        adapter = reading_adapter(live: config(max_retries: 5), pristine: config)
+
+        expect(described_class.private_instance_methods(false)).to include(:ships?)
+        expect(described_class.instance_method(:ships?).parameters.map(&:first)).to eq([:req])
+        expect(described_class::SETTINGS.map { |setting| adapter.send(:ships?, setting) }).to all(be(true))
+        expect(adapter.reading(:max_retries)).to have_attributes(value: 5, default: 3, state: :configured)
+      end
+
+      it "is read by truthiness, like every predicate here, so a hook that answers nil has said not shipped" do
+        adapter = reading_adapter(live: config(max_retries: 5), pristine: config)
+        allow(adapter).to receive(:ships?).and_return(nil)
+
+        expect(adapter.reading(:max_retries)).to have_attributes(state: :unsupported, value: nil, default: nil)
+      end
+
+      it "reports a setting the adapter says this host does not ship as unsupported, carrying neither value " \
+         "nor default, and leaves the others alone" do
+        adapter = unshipping_adapter(live: config(request_timeout: 45, max_retries: 5), pristine: config,
+                                     unshipped: [:max_retries])
+
+        expect(adapter.reading(:max_retries))
+          .to have_attributes(client: :fixture_client, setting: :max_retries, value: nil, default: nil,
+                              state: :unsupported)
+        expect(adapter.reading(:request_timeout)).to have_attributes(value: 45, default: 300, state: :configured)
+      end
+
+      it "counts it as determined, because nothing shipping here is a fact about a loaded client" do
+        adapter = unshipping_adapter(live: config, pristine: config, unshipped: [:max_retries])
+
+        expect(adapter.reading(:max_retries)).to be_determined
+      end
+
+      # No other fixture here maps a setting to an accessor named differently, which is what would let the
+      # hook drift to being asked by accessor without a single example noticing. The renamed accessor is the
+      # one adapter shape that can tell the two apart.
+      it "is asked by the canonical setting and never by the accessor it maps to, so an override can answer " \
+         "in Base's vocabulary" do
+        renamed = Data.define(:request_timeout, :retries, :max_output_tokens)
+        live = renamed.new(request_timeout: 45, retries: 5, max_output_tokens: nil)
+        pristine = renamed.new(request_timeout: 300, retries: 3, max_output_tokens: nil)
+        settings = canonical_settings.merge(max_retries: :retries)
+        by_setting = unshipping_adapter(live: live, pristine: pristine, unshipped: [:max_retries], settings: settings)
+        by_accessor = unshipping_adapter(live: live, pristine: pristine, unshipped: [:retries], settings: settings)
+
+        expect(by_setting.reading(:max_retries)).to have_attributes(state: :unsupported, value: nil, default: nil)
+        expect(by_accessor.reading(:max_retries)).to have_attributes(state: :configured, value: 5, default: 3)
+      end
+
+      it "asks detection first, so an unloaded client reads absent whatever the hook would say" do
+        hide_const("FictionalClient")
+        adapter = unshipping_adapter(live: config, pristine: config, unshipped: [:max_retries])
+        expect(adapter).not_to receive(:ships?)
+
+        expect(adapter.reading(:max_retries)).to have_attributes(state: :absent)
+      end
+
+      it "never asks it about a declared nil, so the declaration keeps the last word" do
+        adapter = reading_adapter(live: config, pristine: config,
+                                  settings: { request_timeout: :request_timeout, max_retries: nil,
+                                              max_output_tokens: :max_output_tokens })
+        expect(adapter).not_to receive(:ships?)
+
+        expect(adapter.reading(:max_retries)).to have_attributes(state: :unsupported)
+      end
+
+      it "is asked after the accessor check, so a declared accessor that is not there is drift first" do
+        drifted = Data.define(:timeout_seconds).new(timeout_seconds: 45)
+        adapter = unshipping_adapter(live: drifted, pristine: config, unshipped: [:max_retries])
+        expect(adapter).not_to receive(:ships?)
+
+        expect(adapter.reading(:max_retries)).to have_attributes(state: :unreadable, value: nil, default: nil)
+      end
+
+      it "is asked before the accessor is read, so a reader that raises when nothing ships behind it is the " \
+         "hook's answer and never drift" do
+        exploding = Class.new { def max_retries = raise("nothing to build") }.new
+        adapter = unshipping_adapter(live: exploding, pristine: config, unshipped: [:max_retries])
+
+        expect(adapter.reading(:max_retries)).to have_attributes(state: :unsupported, value: nil, default: nil)
+      end
+
+      it "reports unreadable rather than raising when the hook itself raises, since a hook that walks a client " \
+         "can meet drift" do
+        adapter = reading_adapter(live: config, pristine: config)
+        allow(adapter).to receive(:ships?).and_raise("the connection blew up")
+
+        expect { adapter.readings }.not_to raise_error
+        expect(adapter.reading(:max_retries)).to have_attributes(state: :unreadable, value: nil, default: nil)
+      end
+
+      it "keeps a hook that raised a ScriptError loud, on the line the rescue draws" do
+        adapter = reading_adapter(live: config, pristine: config)
+        allow(adapter).to receive(:ships?).and_raise(NotImplementedError)
+
+        expect { adapter.reading(:max_retries) }.to raise_error(NotImplementedError)
+      end
+    end
   end
 
   describe "#readings" do
@@ -582,6 +691,34 @@ RSpec.describe LlmAudit::Adapters::Base do
       end
 
       expect(adapter_class.instance_methods(false)).to contain_exactly(:configuration, :default_configuration)
+      expect(adapter_class.new.readings.values.map { |reading| [reading.setting, reading.state, reading.value] })
+        .to eq([[:request_timeout, :configured, 45], [:max_retries, :unsupported, nil],
+                [:max_output_tokens, :unsupported, nil]])
+    end
+
+    it "adds a client whose setting the host ships, not the client, with one private hook more and still " \
+       "nothing public" do
+      stub_const("Fictional", Module.new)
+      stub_const("Fictional::Configuration", config_class)
+      stub_const("Fictional::CONFIG", config_class.new(request_timeout: 45, max_retries: 3, max_output_tokens: nil))
+
+      adapter_class = Class.new(described_class) do
+        declare id: :fictional, gem_name: "fictional-ai", client_constant: "Fictional",
+                settings: { request_timeout: :request_timeout, max_retries: :max_retries, max_output_tokens: nil }
+
+        def configuration = client_module::CONFIG
+
+        def default_configuration
+          client_module::Configuration.new(request_timeout: 300, max_retries: 3, max_output_tokens: nil)
+        end
+
+        private
+
+        def ships?(setting) = setting != :max_retries
+      end
+
+      expect(adapter_class.instance_methods(false)).to contain_exactly(:configuration, :default_configuration)
+      expect(adapter_class.private_instance_methods(false)).to contain_exactly(:ships?)
       expect(adapter_class.new.readings.values.map { |reading| [reading.setting, reading.state, reading.value] })
         .to eq([[:request_timeout, :configured, 45], [:max_retries, :unsupported, nil],
                 [:max_output_tokens, :unsupported, nil]])

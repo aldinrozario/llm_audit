@@ -164,9 +164,9 @@ RSpec.describe LlmAudit::Checks::Base do
       expect(check.send(:adapters).map(&:class)).to eq(LlmAudit.adapters)
     end
 
-    # The example above cannot tell the manifest from a hardcoded [Adapters::RubyLlm], because the manifest is
-    # a one-element literal today. This one moves the manifest out from under the default, so a check that
-    # audits a list of its own rather than everything listed fails here - invariant 1.
+    # The example above cannot tell the manifest from a hardcoded copy of it, because the manifest is a literal.
+    # This one moves the manifest out from under the default, so a check that audits a list of its own rather
+    # than everything listed fails here - invariant 1.
     it "follows the manifest rather than a list of its own" do
       manifest = [stub_adapter_class, stub_adapter_class]
       allow(LlmAudit).to receive(:adapters).and_return(manifest)

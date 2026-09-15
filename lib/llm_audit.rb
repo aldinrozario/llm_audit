@@ -8,6 +8,7 @@ require_relative "llm_audit/registry"
 require_relative "llm_audit/adapters/reading"
 require_relative "llm_audit/adapters/base"
 require_relative "llm_audit/adapters/ruby_llm"
+require_relative "llm_audit/adapters/ruby_openai"
 require_relative "llm_audit/checks/base"
 require_relative "llm_audit/checks/request_timeout"
 require_relative "llm_audit/checks/max_retries"
@@ -28,7 +29,7 @@ module LlmAudit
   # an adapter reaching Doctor's registry would be `call`ed as though it were a check. Not Base.subclasses
   # either - the anonymous subclasses the specs build linger there until GC and would pollute the list.
   def self.adapters
-    @adapters ||= [Adapters::RubyLlm].freeze
+    @adapters ||= [Adapters::RubyLlm, Adapters::RubyOpenai].freeze
   end
 end
 

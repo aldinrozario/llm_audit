@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "open3"
+require "stringio"
 require_relative "support/ruby_llm_client"
 require_relative "support/ruby_openai_client"
 
@@ -119,6 +120,173 @@ RSpec.describe LlmAudit do
           expect { adapter.new.readings }.not_to output.to_stderr_from_any_process
         end
       end
+    end
+  end
+
+  # GH-7 AC3/AC4/AC6, at the level a user sees: a whole Doctor run over both real clients. "Undetermined
+  # without credentials" holds vacuously in M1 - no reading in this vocabulary needs a key (ruby_llm's config is
+  # a plain object; ruby-openai 8.3.0's Client.new does not raise without a token, and the token never reaches
+  # the connection the adapter walks) - so it is pinned rather than built: the cross-check proves a determined
+  # severity appears exactly where the adapter's reading was readable, the differential proves a credential
+  # changes no verdict, and the degrade example pins the one credential-gated shape (ruby-openai below 7.0).
+  # The sentinel examples are G33's positive control, live because the assay examples show the same run would
+  # have printed the sentinel through a formatter that inspected the ruby-openai configuration - and ruby_llm's
+  # below 2.0, where Configuration#inspect still fell through to Kernel#inspect. Both pristine contexts
+  # are included because every example here materialises both process-global configs, and the sentinel ones
+  # mutate them.
+  describe "Doctor, run against the real clients" do
+    include_context "with a pristine RubyLLM configuration"
+    include_context "with a pristine OpenAI configuration"
+
+    let(:sentinel) { "sk-SENTINEL-DO-NOT-LEAK-0123" }
+    let(:expected_count) { LlmAudit.registry.ids.size * LlmAudit.adapters.size }
+    let(:unread) { [LlmAudit::Adapters::Reading::ABSENT, LlmAudit::Adapters::Reading::UNREADABLE] }
+    # Every option a credential travels under on either configuration, read off each client's own option list
+    # rather than named one by one, so a provider added upstream is covered the day it lands.
+    let(:credential) { /(?:_key|_token)\z/ }
+    let(:ruby_llm_credentials) { RubyLLM::Configuration.options.grep(credential) }
+    let(:ruby_openai_credentials) { RubyOpenaiConfigIsolation.options.grep(credential) }
+
+    def run_doctor(environment: "test")
+      io = StringIO.new
+      doctor = LlmAudit::Doctor.new(io: io, environment: environment)
+      doctor.run
+      [doctor.findings, io.string]
+    end
+
+    def credential_every_client
+      ruby_llm_credentials.each { |option| RubyLLM.config.public_send(:"#{option}=", sentinel) }
+      ruby_openai_credentials.each { |option| OpenAI.configuration.public_send(:"#{option}=", sentinel) }
+    end
+
+    def text_of(findings)
+      findings.flat_map { |finding| finding.to_h.values.map(&:to_s) }.join("\n")
+    end
+
+    # What a formatter that rendered the configuration itself would print - the leak the sentinel examples
+    # exist to rule out, run through Doctor so the whole path is the real one.
+    def inspected(configuration)
+      io = StringIO.new
+      LlmAudit::Doctor.new(formatter: ->(_findings, **) { configuration.inspect }, io: io).run
+      io.string
+    end
+
+    # One entry per (check, adapter) - which holds because the pristine contexts leave every reading on the
+    # client's own default and no check is silent on a default (each check's #graded returns nil only for a
+    # value the app chose, inside the limit), not because Doctor promises it; a :configured within-limit
+    # reading would drop its entry and misalign the map, which is what the count example above reports first.
+    # In the order Doctor#findings produces them: the registry in registration order, and within each check
+    # the adapters in manifest order.
+    def unread_map
+      LlmAudit.registry.flat_map do |check|
+        LlmAudit.adapters.map { |adapter| unread.include?(adapter.new.reading(check::SETTING).state) }
+      end
+    end
+
+    it "starts with every credential on both clients unset, so the examples below audit a host with none" do
+      expect(ruby_llm_credentials).not_to be_empty
+      expect(ruby_openai_credentials).not_to be_empty
+      expect(ruby_llm_credentials.map { |option| RubyLLM.config.public_send(option) }).to all(be_nil)
+      expect(ruby_openai_credentials.map { |option| OpenAI.configuration.public_send(option) }).to all(be_nil)
+      expect(RubyLlmConfigIsolation.leaked_options(RubyLLM.config)).to be_empty
+      expect(RubyOpenaiConfigIsolation.leaked_options(OpenAI.configuration)).to be_empty
+    end
+
+    it "reports one finding per check per adapter with no credential in the process, omitting none" do
+      findings, = run_doctor
+
+      expect(findings.size).to eq(expected_count)
+      expect(findings.map(&:message)).not_to include(a_string_including("did not finish"))
+    end
+
+    it "reports undetermined exactly where the adapter could not read, and a determined severity nowhere else" do
+      findings, = run_doctor
+
+      expect(findings.map(&:undetermined?)).to eq(unread_map)
+    end
+
+    # On today's clients every reading reads, so the map above is all false and a check that graded an
+    # unreadable reading would not flip it. This leg puts one unreadable reading in play (ruby-openai below 7.0
+    # raises at Client.new without a token, the shape spec/llm_audit/adapters/ruby_openai_spec.rb pins) and
+    # asks the same question, so the cross-check is shown live rather than assumed so.
+    it "lines up the same way once a reading is unreadable, so the cross-check is not vacuous on a host where " \
+       "every reading reads" do
+      allow(OpenAI::Client).to receive(:new).and_raise(OpenAI::ConfigurationError)
+      findings, = run_doctor
+
+      expect(unread_map).to include(true)
+      expect(findings.map(&:undetermined?)).to eq(unread_map)
+    end
+
+    # Reddens the day an adapter's reading becomes credential-gated, which is a conscious vocabulary decision
+    # and not one to discover from a report.
+    it "changes no verdict when every credential is set: no reading in this vocabulary is gated on one" do
+      bare, = run_doctor
+      credential_every_client
+      keyed, = run_doctor
+
+      expect(keyed).to eq(bare)
+    end
+
+    it "degrades to undetermined, never a pass, on the one shape that does need a token: a ruby-openai client " \
+       "that will not build" do
+      allow(OpenAI::Client).to receive(:new).and_raise(OpenAI::ConfigurationError)
+      findings, printed = run_doctor
+
+      expect(findings.size).to eq(expected_count)
+      expect(printed).to include("[UNDETERMINED] max_retries: the ruby-openai client is loaded but its retry " \
+                                 "count could not be read")
+      expect(printed).to match(/\[WARNING\] request_timeout: the ruby-openai client runs on the client's own default/)
+      expect(findings.select(&:undetermined?).map(&:check_id)).to eq([:max_retries])
+    end
+
+    # G33's upstream premise, and what makes the two sentinel examples below live: a formatter that did
+    # inspect the configuration would print the key. ruby-openai's OpenAI::Configuration falls through to
+    # Kernel#inspect, which prints every ivar, so this leg is the positive control.
+    it "would print the sentinel through a formatter that inspected the ruby-openai configuration, so the " \
+       "assertions below are live" do
+      credential_every_client
+
+      expect(inspected(OpenAI.configuration)).to include(sentinel)
+    end
+
+    # ruby_llm closed its half of G33 in 2.0: RubyLLM::Configuration#inspect redacts, where 1.x fell through
+    # to Kernel#inspect. Pinned by version rather than dropped, because the gem has no runtime dependency on
+    # ruby_llm and a host on 1.x still carries the leak the scan in
+    # spec/llm_audit/client_object_invariant_spec.rb guards against. The readback comes first on both
+    # branches: from 2.0 the assay is a negative, and a negative proves nothing about a key that was never
+    # stored.
+    it "would print the sentinel through a formatter that inspected the ruby_llm configuration below 2.0, " \
+       "and not from 2.0, where Configuration#inspect redacts" do
+      credential_every_client
+      inspect_owner = RubyLLM::Configuration.instance_method(:inspect).owner
+
+      expect(ruby_llm_credentials.map { |option| RubyLLM.config.public_send(option) }).to all(eq(sentinel))
+      if Gem::Version.new(RubyLLM::VERSION) >= Gem::Version.new("2.0")
+        expect(inspect_owner).to eq(RubyLLM::Configuration)
+        expect(inspected(RubyLLM.config)).not_to include(sentinel)
+      else
+        expect(inspect_owner).to eq(Kernel)
+        expect(inspected(RubyLLM.config)).to include(sentinel)
+      end
+    end
+
+    it "prints a sentinel key from neither client's configuration, in any field of any finding" do
+      credential_every_client
+      findings, printed = run_doctor
+
+      expect(findings.size).to eq(expected_count)
+      expect(printed).not_to include(sentinel)
+      expect(text_of(findings)).not_to include(sentinel)
+    end
+
+    it "keeps it out of a development report too" do
+      credential_every_client
+      findings, printed = run_doctor(environment: "development")
+
+      expect(printed).to include(LlmAudit::Formatters::Terminal::DEVELOPMENT_WARNING)
+      expect(printed).not_to include(sentinel)
+      expect(text_of(findings)).not_to include(sentinel)
     end
   end
 

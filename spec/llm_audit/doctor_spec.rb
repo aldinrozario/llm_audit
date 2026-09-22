@@ -125,9 +125,19 @@ RSpec.describe LlmAudit::Doctor do
     end
 
     it "renders through any object responding to #call, not only the terminal formatter" do
-      described_class.new(registry: registry, formatter: ->(findings) { "n=#{findings.size}" }, io: io).run
+      formatter = ->(findings, environment:) { "n=#{findings.size} env=#{environment}" }
+      described_class.new(registry: registry, formatter: formatter, io: io, environment: "production").run
 
-      expect(io.string).to eq("n=2\n")
+      expect(io.string).to eq("n=2 env=production\n")
+    end
+
+    # The keyword is always passed: a formatter that cannot take it is refused, never quietly rendered without
+    # the banner, so no arity shim can drop the environment from a report on a one-argument formatter.
+    it "refuses a formatter that does not take the environment, rather than dropping the banner for it" do
+      doctor = described_class.new(registry: registry, formatter: ->(findings) { findings.size.to_s }, io: io)
+
+      expect { doctor.run }.to raise_error(ArgumentError, /wrong number of arguments/)
+      expect(io.string).to be_empty
     end
 
     it "prints the same report twice, a caller having failed to inject a finding between the runs" do
@@ -154,8 +164,49 @@ RSpec.describe LlmAudit::Doctor do
       it "renders the no-findings output rather than raising" do
         expect { doctor.run }.not_to raise_error
 
-        expect(io.string).to eq("#{LlmAudit::Formatters::Terminal::NO_FINDINGS}\n")
+        expect(io.string).to eq("#{LlmAudit::Formatters::Terminal::UNDETERMINED_ENVIRONMENT}\n\n" \
+                                "#{LlmAudit::Formatters::Terminal::NO_FINDINGS}\n")
       end
+    end
+  end
+
+  # The environment is run metadata, injected and never resolved here: a Doctor built outside Rails has no
+  # Rails.env to read, ENV["RAILS_ENV"] skips Rails' own fallback chain, and a self-resolving default would
+  # flip with spec load order. The rake task is the one caller that knows Rails, and it passes the value in.
+  describe "the environment" do
+    it "hands the environment it was built with to the formatter" do
+      described_class.new(registry: registry, formatter: formatter, io: io, environment: "production").run
+
+      expect(io.string.lines.first).to eq("llm_audit: environment: production\n")
+    end
+
+    it "reports it as undetermined when built without one, which is every Doctor built outside Rails" do
+      doctor.run
+
+      expect(io.string).to start_with(LlmAudit::Formatters::Terminal::UNDETERMINED_ENVIRONMENT)
+    end
+
+    it "warns on development in the banner and adds no finding for it" do
+      doctor = described_class.new(registry: registry, formatter: formatter, io: io, environment: "development")
+      doctor.run
+
+      expect(doctor.findings).to eq([timeout_finding, retry_finding])
+      expect(io.string).to include(LlmAudit::Formatters::Terminal::DEVELOPMENT_WARNING)
+      expect(io.string.scan(/^\[/).size).to eq(2)
+    end
+
+    it "grades the same findings whatever the environment" do
+      development = described_class.new(registry: registry, formatter: formatter, io: io, environment: "development")
+      production = described_class.new(registry: registry, formatter: formatter, io: io, environment: "production")
+
+      expect(development.findings).to eq(production.findings)
+    end
+
+    it "refuses to run with a blank environment rather than printing one" do
+      doctor = described_class.new(registry: registry, formatter: formatter, io: io, environment: " ")
+
+      expect { doctor.run }.to raise_error(ArgumentError, /environment must be a non-empty String or nil/)
+      expect(io.string).to be_empty
     end
   end
 

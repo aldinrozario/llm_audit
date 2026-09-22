@@ -3,6 +3,8 @@
 RSpec.describe LlmAudit::Formatters::Terminal do
   subject(:formatter) { described_class.new }
 
+  let(:undetermined_banner) { "#{described_class::UNDETERMINED_ENVIRONMENT}\n\n" }
+
   def attributes(**overrides)
     {
       check_id: :request_timeout,
@@ -23,12 +25,12 @@ RSpec.describe LlmAudit::Formatters::Terminal do
       expect { formatter.call([]) }.not_to raise_error
     end
 
-    it "returns the NO_FINDINGS constant" do
-      expect(formatter.call([])).to eq(described_class::NO_FINDINGS)
+    it "returns the NO_FINDINGS constant below the banner" do
+      expect(formatter.call([])).to eq("#{undetermined_banner}#{described_class::NO_FINDINGS}")
     end
 
     it "reads llm_audit: no findings" do
-      expect(formatter.call([])).to eq("llm_audit: no findings")
+      expect(formatter.call([])).to end_with("llm_audit: no findings")
     end
   end
 
@@ -39,8 +41,10 @@ RSpec.describe LlmAudit::Formatters::Terminal do
   end
 
   describe "a single finding" do
-    it "renders the summary and all six fields" do
+    it "renders the environment, the summary and all six fields, in that order" do
       expected = <<~REPORT.chomp
+        llm_audit: environment: production
+
         llm_audit: 1 finding
 
         [WARNING] request_timeout: the client timeout is 300s
@@ -49,7 +53,7 @@ RSpec.describe LlmAudit::Formatters::Terminal do
           owasp:       LLM10:2025 Unbounded Consumption
       REPORT
 
-      expect(formatter.call([build])).to eq(expected)
+      expect(formatter.call([build], environment: "production")).to eq(expected)
     end
   end
 
@@ -81,11 +85,12 @@ RSpec.describe LlmAudit::Formatters::Terminal do
 
   describe "the summary line" do
     it "is singular for one finding" do
-      expect(formatter.call([build])).to start_with("llm_audit: 1 finding\n")
+      expect(formatter.call([build])).to start_with("#{undetermined_banner}llm_audit: 1 finding\n")
     end
 
     it "is plural for two findings" do
-      expect(formatter.call([build, build(check_id: :missing_retries)])).to start_with("llm_audit: 2 findings\n")
+      expect(formatter.call([build, build(check_id: :missing_retries)]))
+        .to start_with("#{undetermined_banner}llm_audit: 2 findings\n")
     end
   end
 
@@ -113,14 +118,14 @@ RSpec.describe LlmAudit::Formatters::Terminal do
     it "renders one severity band per finding, so a message cannot forge another" do
       output = formatter.call([build(message: "real\n\n[ERROR] fake_check: injected")])
 
-      expect(output).to start_with("llm_audit: 1 finding\n")
+      expect(output).to start_with("#{undetermined_banner}llm_audit: 1 finding\n")
       expect(output.scan(/^\[/).size).to eq(1)
     end
 
     it "renders one severity band per finding, so a check id cannot forge another" do
       output = formatter.call([build(check_id: :"fake\n\n[ERROR] injected_check: forged")])
 
-      expect(output).to start_with("llm_audit: 1 finding\n")
+      expect(output).to start_with("#{undetermined_banner}llm_audit: 1 finding\n")
       expect(output.scan(/^\[/).size).to eq(1)
     end
 
@@ -213,17 +218,93 @@ RSpec.describe LlmAudit::Formatters::Terminal do
     end
 
     it "is stateless, so one instance can be reused across collections" do
-      expect(formatter.call([build, build])).to start_with("llm_audit: 2 findings\n")
-      expect(formatter.call([build])).to start_with("llm_audit: 1 finding\n")
-      expect(formatter.call([])).to eq(described_class::NO_FINDINGS)
+      expect(formatter.call([build, build])).to start_with("#{undetermined_banner}llm_audit: 2 findings\n")
+      expect(formatter.call([build])).to start_with("#{undetermined_banner}llm_audit: 1 finding\n")
+      expect(formatter.call([])).to eq("#{undetermined_banner}#{described_class::NO_FINDINGS}")
     end
 
-    it "exposes a one-argument #call" do
-      expect(described_class.instance_method(:call).arity).to eq(1)
+    it "takes the findings positionally and the environment by keyword" do
+      expect(described_class.instance_method(:call).parameters).to eq([%i[req findings], %i[key environment]])
     end
 
     it "renders ASCII only, with no ANSI escape sequences" do
       expect(formatter.call([build])).to match(/\A[\x20-\x7E\n]*\z/)
+      expect(formatter.call([build], environment: "development")).to match(/\A[\x20-\x7E\n]*\z/)
+    end
+  end
+
+  # The environment is run metadata and never a Finding: it is rendered as a banner above the summary, and a
+  # caller that could not say which environment it audited - a Doctor built outside Rails - reads as
+  # undetermined rather than as nothing. Rails.env is host-controlled free text, RAILS_ENV reaching it
+  # verbatim, so the value goes through one_line like every other value from outside.
+  describe "the environment banner" do
+    it "names the environment on the first line, before the summary and any finding" do
+      output = formatter.call([build], environment: "production")
+
+      expect(output.lines.first).to eq("llm_audit: environment: production\n")
+      expect(output.index("[WARNING]")).to be > output.index("llm_audit: environment: production")
+    end
+
+    it "reads as undetermined when none was given, never as nothing" do
+      expect(formatter.call([build])).to start_with(described_class::UNDETERMINED_ENVIRONMENT)
+      expect(formatter.call([build], environment: nil)).to start_with(described_class::UNDETERMINED_ENVIRONMENT)
+    end
+
+    it "warns on development as a second banner line and never as a severity band" do
+      output = formatter.call([build], environment: "development")
+
+      expect(output.lines[1]).to eq("#{described_class::DEVELOPMENT_WARNING}\n")
+      expect(output.scan(/^\[/).size).to eq(1)
+      expect(output).to include("llm_audit: 1 finding")
+    end
+
+    it "does not warn on production, test, or staging" do
+      %w[production test staging].each do |environment|
+        expect(formatter.call([build], environment: environment)).not_to include(described_class::DEVELOPMENT_WARNING)
+      end
+    end
+
+    it "does not warn on a value that merely contains development" do
+      %W[development\n predevelopment development2 Development].each do |environment|
+        expect(formatter.call([build], environment: environment))
+          .not_to include(described_class::DEVELOPMENT_WARNING), environment.inspect
+      end
+    end
+
+    it "opens no banner line with [, so a banner cannot be grepped as a finding" do
+      expect(formatter.call([], environment: "development").lines.grep(/\A\[/)).to be_empty
+      expect(formatter.call([]).lines.grep(/\A\[/)).to be_empty
+    end
+
+    it "collapses a line break in the environment onto the banner line" do
+      output = formatter.call([build], environment: "prod\n\n[ERROR] forged: x")
+
+      expect(output.lines.first).to eq("llm_audit: environment: prod [ERROR] forged: x\n")
+      expect(output.scan(/^\[/).size).to eq(1)
+    end
+
+    it "strips an ANSI escape from the environment, so it cannot repaint the banner" do
+      output = formatter.call([build], environment: "prod\e[2K\rllm_audit: no findings")
+
+      expect(output.lines.first).to eq("llm_audit: environment: prod [2K llm_audit: no findings\n")
+      expect(output).not_to include("\e")
+    end
+
+    it "refuses an environment that is not a non-empty String" do
+      [:development, "", "  ", 1].each do |environment|
+        expect { formatter.call([build], environment: environment) }
+          .to raise_error(ArgumentError, /environment must be a non-empty String or nil/), environment.inspect
+      end
+    end
+
+    it "returns no trailing newline with a banner either" do
+      expect(formatter.call([build], environment: "development")).not_to end_with("\n")
+      expect(formatter.call([], environment: "production")).not_to end_with("\n")
+    end
+
+    it "prints the banner, a blank line, then the no-findings line for an empty collection" do
+      expect(formatter.call([], environment: "production"))
+        .to eq("llm_audit: environment: production\n\n#{described_class::NO_FINDINGS}")
     end
   end
 end

@@ -14,14 +14,15 @@ module LlmAudit
                  "client's configuration object carries that object's inspect, and that inspect holds " \
                  "every API key it was given."
 
-    def initialize(registry: LlmAudit.registry, formatter: Formatters::Terminal.new, io: $stdout)
+    def initialize(registry: LlmAudit.registry, formatter: Formatters::Terminal.new, io: $stdout, environment: nil)
       @registry = registry
       @formatter = formatter
       @io = io
+      @environment = environment
     end
 
     def run
-      io.puts(formatter.call(findings))
+      io.puts(formatter.call(findings, environment: environment))
       findings
     end
 
@@ -31,7 +32,7 @@ module LlmAudit
 
     private
 
-    attr_reader :registry, :formatter, :io
+    attr_reader :registry, :formatter, :io, :environment
 
     # A raising check costs its own findings and not the run's: the adapter layer already degrades client
     # drift to an unreadable reading, and this is that promise one layer up. StandardError only, so a check

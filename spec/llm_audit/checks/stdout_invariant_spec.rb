@@ -8,7 +8,7 @@ RSpec.describe "the no-stdout invariant" do
   let(:scanned_files) { Dir.glob(File.join(lib_directory, "**", "*.rb")) - [single_writer] }
   let(:check_files) { Dir.glob(File.join(lib_directory, "llm_audit", "checks", "**", "*.rb")) }
   let(:non_code_tokens) { %i[on_tstring_content on_comment on_embdoc] }
-  let(:output_primitive) { /\A(?:puts|print|printf|pp|warn|display|\$stdout|\$stderr|\$>|STDOUT|STDERR)\z/ }
+  let(:output_primitive) { /\A(?:p|puts|print|printf|pp|warn|display|\$stdout|\$stderr|\$>|STDOUT|STDERR)\z/ }
   let(:offences) { offences_in(scanned_files) }
 
   def offences_in(paths)
